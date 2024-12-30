@@ -21,13 +21,20 @@ for very useful and intersting flows to be performed:
 
 
 ## Steps needed to get started
-- [ ] Download the framework repo: git clone git@github.com:rotalex/graybox.git
-- [ ] Install the framework: pip instal -e .
-- [ ] Download the UI repo: git@github.com:GrayboxTech/weightslab_ui.git
-- [ ] Compile rpc messages: python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. experiment_service.proto
-- [ ] Start the trainer process: python trainer_process.py
-- [ ] Launch UI monitoring process: python weights_lab.py --root_directory=PATH_TO_ROOT_DIRECTORY_OF_EXPERIMENT
-- [ ] Open link from terminal: '''   Dash is running on http://127.0.0.1:8050/ '''
+- [ ] Download the framework repo:
+```git clone git@github.com:rotalex/graybox.git``
+- [ ] Install the framework:
+```pip instal -e .```
+- [ ] Download the UI repo:
+```git@github.com:GrayboxTech/weightslab_ui.git```
+- [ ] Compile rpc messages:
+```python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. experiment_service.proto```
+- [ ] Start the trainer process:
+```python trainer_process.py```
+- [ ] Launch UI monitoring process:
+```python weights_lab.py --root_directory=PATH_TO_ROOT_DIRECTORY_OF_EXPERIMENT```
+- [ ] Open link from terminal:
+``` Dash is running on http://127.0.0.1:8050/ ```
 
 
 ### Initial page
