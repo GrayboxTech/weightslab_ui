@@ -22,7 +22,7 @@ for very useful and intersting flows to be performed:
 
 ## Steps needed to get started
 - [ ] Download the framework repo:
-```git clone git@github.com:rotalex/graybox.git``
+```git clone git@github.com:rotalex/graybox.git```
 - [ ] Install the framework:
 ```pip instal -e .```
 - [ ] Download the UI repo:
