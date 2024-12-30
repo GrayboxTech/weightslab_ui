@@ -33,7 +33,7 @@ for very useful and intersting flows to be performed:
 ```python trainer_process.py```
 - [ ] Launch UI monitoring process:
 ```python weights_lab.py --root_directory=PATH_TO_ROOT_DIRECTORY_OF_EXPERIMENT```
-- [ ] Open link from terminal:
+- [ ] Open the link from terminal:
 ``` Dash is running on http://127.0.0.1:8050/ ```
 
 
