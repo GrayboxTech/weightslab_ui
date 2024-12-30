@@ -1,3 +1,7 @@
 .mnist/*
 __pycache__/*
 examples/__pycache__/*
+tiny-image-net-dbg/*
+tiny-image-net/*
+experiment_service_pb2.py
+experiment_service_pb2_grpc.py
