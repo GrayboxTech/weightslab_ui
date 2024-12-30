@@ -1,19 +1,18 @@
-# WeightsLab UI onboarding steps
-This is WeightsLab (or Graybox UI) an UI interface designed to allow AI
-practitioners to have better control over the training process of
-Deep Neural Networks training.
+# WeightsLab UI
+This is WeightsLab, an UI designed to allow AI practitioners to have better
+control over the training process of Deep Neural Networks training.
 
-This a is early prototype of a solution that aims to DEBUG and FIX potential
+This is an early prototype of a solution that aims to DEBUG and FIX potential
 problems that occurs during training:
 * overfitting
 * plauteous
 * minority class misses
 * problematic data samples analysis
 * data set slicing
-* weights manipulation (freezing, reinitalization)
+* weights manipulation (freezing, reinitialisation)
 
 Since the paradigm is about granular statistics and interactivity, this allows
-for very useful and intersting flows to be performed:
+for very useful and interesting flows to be performed:
 * model minimization
 * data set curation
 * root cause analysis
