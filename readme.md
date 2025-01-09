@@ -21,10 +21,10 @@ for very useful and interesting flows to be performed:
 
 ## Steps needed to get started
 - [ ] Download the framework repo:
-```git clone git@github.com:rotalex/graybox.git```
+```git clone https://github.com/GrayboxTech/weightslab_ui.git``
 - [ ] Install the framework:
 ```pip instal -e .```
-- [ ] Download the UI repo:
+- [ ] Download the UI repo(this repo):
 ```git@github.com:GrayboxTech/weightslab_ui.git```
 - [ ] Compile rpc messages:
 ```python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. experiment_service.proto```
