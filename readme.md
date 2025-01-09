@@ -29,7 +29,7 @@ for very useful and interesting flows to be performed:
 - [ ] Compile rpc messages:
 ```python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. experiment_service.proto```
 - [ ] Start the trainer process:
-```python trainer_process.py```
+```python trainer_worker.py```
 - [ ] Launch UI monitoring process:
 ```python weights_lab.py --root_directory=PATH_TO_ROOT_DIRECTORY_OF_EXPERIMENT```
 - [ ] Open the link from terminal:
