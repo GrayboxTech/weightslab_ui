@@ -267,7 +267,8 @@ def get_exp():
         name="v0",
         root_log_dir='hct-dev',
         logger=Dash("hct-dev"),
-        skip_loading=False)
+        skip_loading=False,
+        criterion=nn.MSELoss(reduction="none"))
 
     def stateful_difference_monitor_callback():
         exp.display_stats()
