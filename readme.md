@@ -21,7 +21,7 @@ for very useful and interesting flows to be performed:
 
 ## Steps needed to get started
 - [ ] Download the framework repo:
-```git clone https://github.com/GrayboxTech/weightslab_ui.git``
+```git clone https://github.com/GrayboxTech/weightslab.git``
 - [ ] Install the framework:
 ```pip install -e .```
 - [ ] Download the UI repo(this repo):
