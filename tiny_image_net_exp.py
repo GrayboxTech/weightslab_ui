@@ -44,6 +44,13 @@ class NanoModel(NetworkWithOps):
         self.bnorm3 = BatchNorm2dWithNeuronOps(N)
         self.mpool3 = nn.MaxPool2d(2)
 
+
+        self.layer34 = Conv2dWithNeuronOps(
+            in_channels=N, out_channels=N, kernel_size=3)
+        self.bnorm34 = BatchNorm2dWithNeuronOps(N)
+        self.mpool34 = nn.MaxPool2d(2)
+
+
         self.layer4 = Conv2dWithNeuronOps(
             in_channels=N, out_channels=N, kernel_size=3)
         self.bnorm4 = BatchNorm2dWithNeuronOps(N)
@@ -65,7 +72,7 @@ class NanoModel(NetworkWithOps):
     def children(self):
         return [
             self.layer1, self.bnorm1, self.layer2, self.bnorm2, self.layer3,
-            self.bnorm3, self.layer4, self.bnorm4, self.layer5, self.bnorm5,
+            self.bnorm3, self.layer34, self.bnorm34, self.layer4, self.bnorm4, self.layer5, self.bnorm5,
             self.fc1, self.fc2, self.fc3
         ]
 
@@ -78,7 +85,13 @@ class NanoModel(NetworkWithOps):
 
             (self.layer3, self.bnorm3, DepType.SAME),
             (self.bnorm3, self.layer4, DepType.INCOMING),
-            (self.layer4, self.bnorm4, DepType.SAME),
+
+            # Link layer 3 to layer 34 and all the additional norm
+            (self.layer4, self.bnorm34, DepType.SAME),
+            (self.bnorm34, self.layer34, DepType.INCOMING),
+
+
+            (self.layer34, self.bnorm4, DepType.SAME),
             (self.bnorm4, self.layer5, DepType.INCOMING),
 
             (self.layer5, self.bnorm5, DepType.SAME),
@@ -106,6 +119,12 @@ class NanoModel(NetworkWithOps):
         x = self.bnorm3(x)
         x = F.relu(x)
         x = self.mpool3(x)
+        
+        # The newly added layer
+        x = self.layer34(x, intermediary=intermediary)
+        x = self.bnorm34(x)
+        x = F.relu(x)
+        x = self.mpool34(x)
 
         x = self.layer4(x, intermediary=intermediary)
         x = self.bnorm4(x)
