@@ -1334,7 +1334,7 @@ def get_data_tab(ui_state: UIState):
     )
     width_percent = 43
 
-    return html.Div(
+    return html.Div(    
         id='train-data-div',
         children=[
             dbc.Row(
@@ -1362,9 +1362,9 @@ def get_ui_app_layout(ui_state: UIState) -> html.Div:
     hyper_parameters_div = get_hyper_params_div(ui_state)
 
     layout_children = [
-        dcc.Interval(id='weights-render-freq', interval=500, n_intervals=0),
-        dcc.Interval(id='datatbl-render-freq', interval=30*1000, n_intervals=0),
-        dcc.Interval(id='graphss-render-freq', interval=30*1000, n_intervals=0),
+        dcc.Interval(id='weights-render-freq', interval=1*1000, n_intervals=0),
+        dcc.Interval(id='datatbl-render-freq', interval=10*1000, n_intervals=0),
+        dcc.Interval(id='graphss-render-freq', interval=10*1000, n_intervals=0),
         html.H1("WeightsLab", style={'textAlign': 'center'}),
         hyper_parameters_div,
     ]
@@ -1876,9 +1876,9 @@ def main():
         return html.Img(
             src=f'data:image/png;base64,{image_base64}',
             style={
-                'width': '24vw',
-                'height': '24vh',
-                'margin': '1vh',
+                'width': '18vw',
+                'height': '18vh',
+                'marginTop': '10vh',
             }
         )
 

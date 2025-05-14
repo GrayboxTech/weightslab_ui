@@ -7,3 +7,15 @@ experiment_service_pb2.py
 experiment_service_pb2_grpc.py
 data/*
 fashion-mnist-dev/*
+cifar-10-batches-py/*
+cifar-10-python.tar.gz
+cifar-100-python.tar.gz
+cifar-100-python/*
+cifar10*/
+.ipynb_checkpoint*
+*.ipynb
+*.pt
+fashion-mnist-demo/*
+hct-dev/*
+root_experiment/*
+*_exp.py
