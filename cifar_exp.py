@@ -123,7 +123,7 @@ transform_train = tt.Compose(
     [
         # tt.RandomCrop(32, padding=4, padding_mode='reflect'),
         tt.RandomHorizontalFlip(),
-        tt.ToTensor(), 
+        tt.ToTensor(),
         tt.Normalize(mean, std, inplace=True)
     ]
 )
@@ -133,9 +133,9 @@ transform_test = tt.Compose([
 ])
 
 
-train_set = ds.CIFAR10(
+train_set = ds.CIFAR100(
     "./data", download=True, transform=transform_train)
-test_set = ds.CIFAR10(
+test_set = ds.CIFAR100(
     "./data", download=True, train=False, transform=transform_test)
 
 device = th.device("cuda:0")
@@ -151,8 +151,8 @@ def get_exp():
         device=device, learning_rate=1e-4, batch_size=2048,
         training_steps_to_do=200000,
         name="v0",
-        root_log_dir='cifar10',
-        logger=Dash("cifar10"),
+        root_log_dir='cifar100',
+        logger=Dash("cifar100"),
         skip_loading=False)
 
     def stateful_difference_monitor_callback():
