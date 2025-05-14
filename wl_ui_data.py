@@ -154,53 +154,89 @@ def update_div_width(inspect_flags, old_style):
     })
     return new_style
 
+# displaying data samples visible on scroll in data table
 
 @app.callback(
     Output('data-panel-col1', 'children', allow_duplicate=True),
-    Input('train-data-table', 'selected_rows'),
-    State('train-data-table', 'data'),
-    State('sample-inspect-checkboxes', 'value'),
+    Input('train-data-table', 'derived_virtual_data'),
+    Input('train-data-table', 'derived_viewport_indices'),
 )
-def render_selected_sample(selected_rows, data, flags):
-    if not selected_rows or not flags:
+def render_visible_samples(virtual_data, viewport_indices):
+    if not virtual_data or not viewport_indices:
         return []
 
-    selected_index = selected_rows[-1] 
-    total_samples = len(data)
-
-    if selected_index <= 0:
-        start = 0
-        end = min(10, total_samples)
-    elif selected_index >= total_samples - 1:
-        end = total_samples
-        start = max(0, total_samples - 10)
-    else:
-        start = max(0, selected_index - 4)
-        end = min(total_samples, start + 10)
-        if end - start < 10:
-            start = max(0, end - 10)
-
-    selected_images = []
-    for i in range(start, end):
-        sample_id = data[i]["SampleId"]
+    visible_images = []
+    for i in viewport_indices[:10]:
+        row = virtual_data[i]
+        sample_id = row["SampleId"]
         response = stub.GetSample(pb2.SampleRequest(sample_id=sample_id, origin="train"))
         img = base64.b64encode(response.data).decode('utf-8')
-        selected_images.append(html.Img(src=f'data:image/png;base64,{img}', style={
-            'width': '12vw', 'height': '12vh', 'margin': '0.5vh'
-        }))
+        visible_images.append(html.Img(
+            src=f'data:image/png;base64,{img}',
+            style={'width': '12vw', 'height': '12vh', 'margin': '0.5vh'}
+        ))
 
     return html.Div(
-        children=selected_images,
+        children=visible_images,
         style={
             "display": "grid",
             "gridTemplateColumns": "repeat(2, 1fr)",
             "gap": "1vh",
             "justifyItems": "center",
-            "alignItems": "center",
-            "paddingLeft": "1vw",
-            "paddingTop": "1vh"
+            "paddingLeft": "1vw"
         }
     )
+
+
+
+# displaying 10 samples around the selected sample
+
+# @app.callback(
+#     Output('data-panel-col1', 'children', allow_duplicate=True),
+#     Input('train-data-table', 'selected_rows'),
+#     State('train-data-table', 'data'),
+#     State('sample-inspect-checkboxes', 'value'),
+# )
+# def render_selected_sample(selected_rows, data, flags):
+#     if not selected_rows or not flags:
+#         return []
+
+#     selected_index = selected_rows[-1] 
+#     total_samples = len(data)
+
+#     if selected_index <= 0:
+#         start = 0
+#         end = min(10, total_samples)
+#     elif selected_index >= total_samples - 1:
+#         end = total_samples
+#         start = max(0, total_samples - 10)
+#     else:
+#         start = max(0, selected_index - 4)
+#         end = min(total_samples, start + 10)
+#         if end - start < 10:
+#             start = max(0, end - 10)
+
+#     selected_images = []
+#     for i in range(start, end):
+#         sample_id = data[i]["SampleId"]
+#         response = stub.GetSample(pb2.SampleRequest(sample_id=sample_id, origin="train"))
+#         img = base64.b64encode(response.data).decode('utf-8')
+#         selected_images.append(html.Img(src=f'data:image/png;base64,{img}', style={
+#             'width': '12vw', 'height': '12vh', 'margin': '0.5vh'
+#         }))
+
+#     return html.Div(
+#         children=selected_images,
+#         style={
+#             "display": "grid",
+#             "gridTemplateColumns": "repeat(2, 1fr)",
+#             "gap": "1vh",
+#             "justifyItems": "center",
+#             "alignItems": "center",
+#             "paddingLeft": "1vw",
+#             "paddingTop": "1vh"
+#         }
+#     )
 
 
 @app.callback(
