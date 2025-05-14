@@ -30,21 +30,21 @@ class FashionCNN(NetworkWithOps):
         self.tracking_mode = TrackingMode.DISABLED
 
         self.layer1 = Conv2dWithNeuronOps(
-            in_channels=1, out_channels=8, kernel_size=3, padding=1)
-        self.bnorm1 = BatchNorm2dWithNeuronOps(8)
+            in_channels=1, out_channels=4, kernel_size=3, padding=1)
+        self.bnorm1 = BatchNorm2dWithNeuronOps(4)
         self.mpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.layer2 = Conv2dWithNeuronOps(
-            in_channels=8, out_channels=8, kernel_size=3)
-        self.bnorm2 = BatchNorm2dWithNeuronOps(8)
+            in_channels=4, out_channels=4, kernel_size=3)
+        self.bnorm2 = BatchNorm2dWithNeuronOps(4)
         self.mpool2 = nn.MaxPool2d(2)
 
-        self.fc1 = LinearWithNeuronOps(in_features=8*6*6, out_features=10)
+        self.fc1 = LinearWithNeuronOps(in_features=4*6*6, out_features=4)
         # self.bnorm3 = BatchNorm2dWithNeuronOps(600)
         self.drop1 = nn.Dropout(0.25)
-        self.fc2 = LinearWithNeuronOps(in_features=10, out_features=10)
+        self.fc2 = LinearWithNeuronOps(in_features=4, out_features=4)
         # self.bnorm4 = BatchNorm2dWithNeuronOps(120)
-        self.fc3 = LinearWithNeuronOps(in_features=10, out_features=10)
+        self.fc3 = LinearWithNeuronOps(in_features=4, out_features=10)
         self.softmax = nn.Softmax(dim=1)
 
     def children(self):
@@ -117,21 +117,13 @@ def get_exp():
         eval_dataset=test_set,
         device=device, learning_rate=1e-3, batch_size=100,
         name="v0",
-        root_log_dir='fashion-mnist-dev',
-        logger=Dash("fashion-mnist-dev"),
+        root_log_dir='fashion-mnist-demo',
+        logger=Dash("fashion-mnist-demo"),
         skip_loading=False)
 
     def stateful_difference_monitor_callback():
         exp.display_stats()
 
     exp.register_train_loop_callback(stateful_difference_monitor_callback)
-
-    # exp.functions_under_button = {
-    #     "rebalance_allow_listed": [("per_class_samples", "number"), ]
-    # }
-    # exp.function_name_to_callback = {
-    #     "rebalance_allow_listed": rebalance_allow_listed
-    # }
-
 
     return exp
