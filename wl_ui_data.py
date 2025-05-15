@@ -5,9 +5,8 @@ import time
 import grpc
 import dash
 import dash_bootstrap_components as dbc
-from dash import html, dcc, no_update
-from dash import dash_table
-from dash.dependencies import Input, Output, State
+from dash import html, dcc, no_update, ctx, dash_table
+from dash.dependencies import Input, Output, State, ALL
 from dash.dash_table.Format import Format, Scheme
 
 import experiment_service_pb2 as pb2
@@ -17,8 +16,10 @@ from weights_lab import (
     get_play_button_html_elements,
     get_pause_button_html_elements,
     get_data_query_input_div,
+    get_hyper_params_div,
     _DISPLAY_COLUMNS,
 )
+
 from scope_timer import ScopeTimer
 update_timer = ScopeTimer(tag="update_train_data_table")
 
@@ -160,17 +161,17 @@ def get_data_tab(ui_state: UIState):
         }
     )
 
-
 app.layout = html.Div([
     dcc.Interval(id='datatbl-render-freq', interval=10000, n_intervals=0),
-    dbc.Row([
-        dbc.Col(dbc.Button(
-            id='resume-pause-train-btn',
-            children=get_play_button_html_elements(),
-            color='light', n_clicks=0,
-            style={'marginBottom': '10px'}
-        ), width='auto')
-    ], justify='center'),
+    # dbc.Row([
+    #     dbc.Col(dbc.Button(
+    #         id='resume-pause-train-btn',
+    #         children=get_play_button_html_elements(),
+    #         color='light', n_clicks=0,
+    #         style={'marginBottom': '10px'}
+    #     ), width='auto')
+    # ], justify='center'),
+    get_hyper_params_div(ui_state),
     get_data_tab(ui_state)
 ])
 
@@ -192,6 +193,49 @@ def toggle_training(n_clicks):
 
 
 @app.callback(
+    Output('resume-pause-train-btn', 'children', allow_duplicate=True),
+    Input({"type": "hyper-params-input", "idx": ALL}, "value"),
+    Input('resume-pause-train-btn', 'n_clicks'),
+    prevent_initial_call=True
+)
+def send_to_controller_hyper_parameters_on_change(hyper_param_values, resume_pause_clicks):
+    print(f"[UI] HyperParams Change: {hyper_param_values}, clicks={resume_pause_clicks}")
+    if not ctx.triggered:
+        return no_update
+
+    prop_id = ctx.triggered_id
+    hyper_parameter = pb2.HyperParameters()
+    button_children = no_update
+
+    if prop_id == 'resume-pause-train-btn':
+        is_training = resume_pause_clicks % 2
+        hyper_parameter.is_training = is_training
+        hyper_parameter.training_steps_to_do = hyper_param_values[5]
+        button_children = get_pause_button_html_elements() if is_training else get_play_button_html_elements()
+    else:
+        idx = prop_id['idx']
+        if idx == "batch_size":
+            hyper_parameter.batch_size = hyper_param_values[0]
+        elif idx == "checkpooint_frequency":
+            hyper_parameter.checkpont_frequency = hyper_param_values[1]
+        elif idx == "eval_frequency":
+            hyper_parameter.full_eval_frequency = hyper_param_values[2]
+        elif idx == "experiment_name":
+            hyper_parameter.experiment_name = hyper_param_values[3]
+        elif idx == "learning_rate":
+            hyper_parameter.learning_rate = hyper_param_values[4]
+        elif idx == "training_left":
+            hyper_parameter.training_steps_to_do = hyper_param_values[5]
+
+    request = pb2.TrainerCommand(
+        hyper_parameter_change=pb2.HyperParameterCommand(
+            hyper_parameters=hyper_parameter
+        )
+    )
+    stub.ExperimentCommand(request)
+    return button_children
+
+@app.callback(
     Output('train-data-table', 'data'),
     Input('datatbl-render-freq', 'n_intervals'),
     State('table-refresh-checkbox', 'value')
@@ -202,6 +246,7 @@ def update_train_data_table(_, chk):
         return no_update
     with update_timer:
         return ui_state.samples_df.to_dict('records')
+    print(update_timer)
 
 
 @app.callback(
