@@ -1278,12 +1278,15 @@ def get_data_tab(ui_state: UIState):
         row_deletable=True,
         editable=True,
         virtualization=True,
-        page_size=500,
+        # modified
+        # page_size=500,
+        page_size = 50,
         style_table={
             "margin": "2px",
             'padding': '2px',
             "display": "flex",
             'height': '25vh',
+            "overflowY": "auto", 
             'width': '38vw',
         },
         style_cell={
@@ -1484,8 +1487,10 @@ def main():
             hyper_parameter.is_training = is_training
             if is_training:
                 button_children = get_pause_button_html_elements()
+                hyper_parameter.training_steps_to_do = hyper_param_values[5]
             else:
                 button_children = get_play_button_html_elements()
+                hyper_parameter.training_steps_to_do = 0
         else:
             btn_dict = eval(prop_id.split('.')[0])
             hyper_parameter_id = btn_dict['idx']
@@ -1570,6 +1575,10 @@ def main():
         # print(f"[UI] WeightsLab.update_layer_data_table.", neuron_dt_div_id)
 
         layer_id = neuron_dt_div_id['layer_id']
+        if layer_id not in ui_state.get_neurons_df().index.get_level_values(0):
+            # print('layer_id not updated:', layer_id)
+
+            return no_update
         layer_neurons_df = ui_state.get_neurons_df().loc[layer_id].copy()
         layer_neurons_df = layer_neurons_df.reset_index()
         layer_neurons_df['layer_id'] = layer_id

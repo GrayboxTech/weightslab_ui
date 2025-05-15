@@ -17,9 +17,10 @@ from scope_timer import ScopeTimer
 from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-# from nano_llm_exp import get_exp
+# from mnist_exp_fully_conv import get_exp
 
 experiment = get_exp()
+experiment.set_is_training(True)
 
 
 def training_thread_callback():
@@ -256,6 +257,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             else:
                 response.layer_representations.extend(
                     get_layer_representations(experiment.model))
+                # print(response)
         if request.get_data_records:
             if request.get_data_records == "train":
                 response.sample_statistics.CopyFrom(

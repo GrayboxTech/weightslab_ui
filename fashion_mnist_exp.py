@@ -30,21 +30,21 @@ class FashionCNN(NetworkWithOps):
         self.tracking_mode = TrackingMode.DISABLED
 
         self.layer1 = Conv2dWithNeuronOps(
-            in_channels=1, out_channels=4, kernel_size=3, padding=1)
-        self.bnorm1 = BatchNorm2dWithNeuronOps(4)
+            in_channels=1, out_channels=2, kernel_size=3, padding=1)
+        self.bnorm1 = BatchNorm2dWithNeuronOps(2)
         self.mpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.layer2 = Conv2dWithNeuronOps(
-            in_channels=4, out_channels=4, kernel_size=3)
+            in_channels=2, out_channels=4, kernel_size=3)
         self.bnorm2 = BatchNorm2dWithNeuronOps(4)
         self.mpool2 = nn.MaxPool2d(2)
 
-        self.fc1 = LinearWithNeuronOps(in_features=4*6*6, out_features=4)
+        self.fc1 = LinearWithNeuronOps(in_features=4*6*6, out_features=6)
         # self.bnorm3 = BatchNorm2dWithNeuronOps(600)
-        self.drop1 = nn.Dropout(0.25)
-        self.fc2 = LinearWithNeuronOps(in_features=4, out_features=4)
+        # self.drop1 = nn.Dropout(0.25)
+        self.fc2 = LinearWithNeuronOps(in_features=6, out_features=8)
         # self.bnorm4 = BatchNorm2dWithNeuronOps(120)
-        self.fc3 = LinearWithNeuronOps(in_features=4, out_features=10)
+        self.fc3 = LinearWithNeuronOps(in_features=8, out_features=10)
         self.softmax = nn.Softmax(dim=1)
 
     def children(self):
@@ -70,20 +70,24 @@ class FashionCNN(NetworkWithOps):
         x = self.layer1(x, intermediary=intermediary)
         x = self.bnorm1(x)
         x = F.relu(x)
+        # x = F.leaky_relu(x, negative_slope=0.01)
         x = self.mpool1(x)
 
         x = self.layer2(x, intermediary=intermediary)
         x = self.bnorm2(x)
         x = F.relu(x)
+        # x = F.leaky_relu(x, negative_slope=0.01)
         x = self.mpool2(x)
 
         x = x.view(x.size(0), -1)
         x = self.fc1(x, intermediary=intermediary)
         x = F.relu(x)
+        # x = F.leaky_relu(x, negative_slope=0.01)
         # x = self.bnorm3(x)
         # x = self.drop1(x)
         x = self.fc2(x, intermediary=intermediary)
         x = F.relu(x)
+        # x = F.leaky_relu(x, negative_slope=0.01)
         # x = self.bnorm4(x)
         output = self.fc3(x, skip_register=True, intermediary=None)
 
@@ -99,13 +103,13 @@ class FashionCNN(NetworkWithOps):
         return output
 
 
-train_set = ds.FashionMNIST(
+train_set = ds.MNIST(
     "./data", download=True, transform=T.Compose([T.ToTensor()]))
-test_set = ds.FashionMNIST(
+test_set = ds.MNIST(
     "./data", download=True, train=False, transform=T.Compose([T.ToTensor()]))  
 
-device = th.device("cuda:0")
-# device = th.device("cpu")
+# device = th.device("cuda:0")
+device = th.device("cpu")
 
 
 def get_exp():
@@ -117,8 +121,8 @@ def get_exp():
         eval_dataset=test_set,
         device=device, learning_rate=1e-3, batch_size=100,
         name="v0",
-        root_log_dir='fashion-mnist-demo',
-        logger=Dash("fashion-mnist-demo"),
+        root_log_dir='mnist-dev-exp7',
+        logger=Dash("mnist-dev-exp7"),
         skip_loading=False)
 
     def stateful_difference_monitor_callback():
