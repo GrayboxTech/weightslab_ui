@@ -1,6 +1,6 @@
 import dash
 import dash_bootstrap_components as dbc
-from dash import html, dcc, ctx
+from dash import html, dcc, ctx, no_update
 from dash.dependencies import Input, Output, State, ALL, MATCH
 import threading
 import grpc
@@ -15,7 +15,9 @@ from weights_lab import (
     UIState, get_weights_div,
     convert_checklist_to_df_head, format_values_df,
     get_layer_headings, layer_div_width, get_play_button_html_elements,
-    get_pause_button_html_elements
+    get_pause_button_html_elements,
+    get_hyper_params_div,
+
 )
 
 def parse_args():
@@ -70,32 +72,75 @@ app.title = "WeightsLab - Architecture Only"
 app.layout = html.Div([
     dcc.Interval(id='weights-render-freq', interval=5000, n_intervals=0),
     html.H1("Model Architecture", style={'textAlign': 'center'}),
-    dbc.Row([
-        dbc.Col(dbc.Button(
-            id='resume-pause-train-btn',
-            children=get_play_button_html_elements(),
-            color='light',
-            n_clicks=0,
-            style={'marginBottom': '10px'}
-        ), width='auto'),
-    ], justify='center'),
+    get_hyper_params_div(ui_state),
     get_weights_div(ui_state),
 ])
-
 @app.callback(
     Output('resume-pause-train-btn', 'children', allow_duplicate=True),
+    Input({"type": "hyper-params-input", "idx": ALL}, "value"),
     Input('resume-pause-train-btn', 'n_clicks'),
     prevent_initial_call=True
 )
-def toggle_training(n_clicks):
-    is_training = n_clicks % 2 == 1
+def send_to_controller_hyper_parameters_on_change(
+        hyper_param_values, resume_pause_clicks):
+    print(
+        f"[UI] WeightsLab.send_to_controller_hyper_parameters_on_change"
+        f" {hyper_param_values}, {resume_pause_clicks}")
+    ctx = dash.callback_context
+
+    if not ctx.triggered:
+        return no_update
+
+    button_children = no_update
+    prop_id = ctx.triggered[0]['prop_id']
     hyper_parameter = pb2.HyperParameters()
-    hyper_parameter.is_training = is_training
+
+    if "resume-pause-train-btn" in prop_id:
+        is_training = resume_pause_clicks % 2
+        hyper_parameter.is_training = is_training
+        if is_training:
+            button_children = get_pause_button_html_elements()
+            hyper_parameter.training_steps_to_do = hyper_param_values[5]
+        else:
+            button_children = get_play_button_html_elements()
+            hyper_parameter.training_steps_to_do = 0
+    else:
+        btn_dict = eval(prop_id.split('.')[0])
+        hyper_parameter_id = btn_dict['idx']
+
+        if hyper_parameter_id == "experiment_name":
+            hyper_parameter.experiment_name = hyper_param_values[3]
+        elif hyper_parameter_id == "training_left":
+            hyper_parameter.training_steps_to_do = hyper_param_values[5]
+        elif hyper_parameter_id == "learning_rate":
+            hyper_parameter.learning_rate = hyper_param_values[4]
+        elif hyper_parameter_id == "batch_size":
+            hyper_parameter.batch_size = hyper_param_values[0]
+        elif hyper_parameter_id == "eval_frequency":
+            hyper_parameter.full_eval_frequency = hyper_param_values[2]
+        elif hyper_parameter_id == "checkpooint_frequency":
+            hyper_parameter.checkpont_frequency = hyper_param_values[1]
+
     request = pb2.TrainerCommand(
         hyper_parameter_change=pb2.HyperParameterCommand(
             hyper_parameters=hyper_parameter))
     stub.ExperimentCommand(request)
-    return get_pause_button_html_elements() if is_training else get_play_button_html_elements()
+    return button_children
+
+# @app.callback(
+#     Output('resume-pause-train-btn', 'children', allow_duplicate=True),
+#     Input('resume-pause-train-btn', 'n_clicks'),
+#     prevent_initial_call=True
+# )
+# def toggle_training(n_clicks):
+#     is_training = n_clicks % 2 == 1
+#     hyper_parameter = pb2.HyperParameters()
+#     hyper_parameter.is_training = is_training
+#     request = pb2.TrainerCommand(
+#         hyper_parameter_change=pb2.HyperParameterCommand(
+#             hyper_parameters=hyper_parameter))
+#     stub.ExperimentCommand(request)
+#     return get_pause_button_html_elements() if is_training else get_play_button_html_elements()
 
 @app.callback(
     Output({'type': 'layer-data-table', 'layer_id': MATCH}, 'columns'),
