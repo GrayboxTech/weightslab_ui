@@ -209,6 +209,13 @@ def add_neuron(n_clicks):
         neurons_to_add=1
     )
     stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=op))
+
+    zerofy_op = pb2.WeightOperation(
+        op_type=pb2.WeightOperationType.ZEROFY,
+        layer_id=layer_id
+    )
+    stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=zerofy_op))
+
     return n_clicks
 
 @app.callback(

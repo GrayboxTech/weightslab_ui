@@ -360,6 +360,13 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             answer = pb2.WeightsOperationResponse(
                 success=True,
                 message=f"Reinitialized {weight_operations.neuron_ids}")
+            
+        elif weight_operations.op_type == pb2.WeightOperationType.ZEROFY:
+            experiment.model.zerofy(layer_id=weight_operations.layer_id)
+            answer = pb2.WeightsOperationResponse(
+                success=True,
+                message=f"Zerofy applied to new neurons in layer {weight_operations.layer_id}")
+
         return answer
 
     def GetWeights(self, request, context):
