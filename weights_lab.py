@@ -37,7 +37,7 @@ import numpy as np
 from collections import defaultdict
 
 from dash.dash_table.Format import Format, Scheme
-
+from scope_timer import ScopeTimer
 from dataclasses import dataclass
 
 
@@ -303,8 +303,11 @@ class UIState:
             server_state.hyper_parameters_descs)
         self.update_neurons_from_server(
             server_state.layer_representations)
+        start = time.time()
         self.update_samples_from_server(
             server_state.sample_statistics)
+        end = time.time()
+        print("Time took to update samples from server", end - start)
 
     def update_hyperparams_from_server(
             self, hyper_parameters_descs: List[pb2.HyperParameterDesc]):
@@ -472,32 +475,59 @@ class UIState:
 
         print("UI.update_metrics_from_server: ", len(self.metrics_df), len(self.annotation), end="\r")
 
-    def update_samples_from_server(
-            self, sample_statistics: pb2.SampleStatistics):
-        populate = self.samples_df.empty
+    # old function
+    # def update_samples_from_server(
+    #         self, sample_statistics: pb2.SampleStatistics):
+    #     populate = self.samples_df.empty
+    #     try:
+    #         for sample_id in sample_statistics.sample_label:
+    #             sample_row = [
+    #                 sample_id,
+    #                 sample_statistics.sample_label[sample_id],
+    #                 sample_statistics.sample_prediction[sample_id],
+    #                 sample_statistics.sample_last_loss[sample_id],
+    #                 sample_statistics.sample_encounters[sample_id],
+    #                 sample_statistics.sample_discarded[sample_id],
+    #             ]
+    #             if populate:
+    #                 with self.lock:
+    #                     self.samples_df.loc[len(self.samples_df)] = sample_row
+    #             elif sample_id in self.samples_df.index:
+    #                 with self.lock:
+    #                     self.samples_df.loc[sample_id] = sample_row
+    #             else:
+    #                 print(f"Sample {sample_id} not found in the dataframe.")
+    #         with self.lock:
+    #             self.samples_df.set_index('SampleId')
+
+    #     except Exception as e:
+    #         print("Error processing sample: {}".format(e))
+
+
+    # updated function to take lists instead of maps
+
+    def update_samples_from_server(self, sample_statistics: pb2.SampleStatistics):
         try:
-            for sample_id in sample_statistics.sample_label:
-                sample_row = [
-                    sample_id,
-                    sample_statistics.sample_label[sample_id],
-                    sample_statistics.sample_prediction[sample_id],
-                    sample_statistics.sample_last_loss[sample_id],
-                    sample_statistics.sample_encounters[sample_id],
-                    sample_statistics.sample_discarded[sample_id],
-                ]
-                if populate:
-                    with self.lock:
-                        self.samples_df.loc[len(self.samples_df)] = sample_row
-                elif sample_id in self.samples_df.index:
-                    with self.lock:
-                        self.samples_df.loc[sample_id] = sample_row
-                else:
-                    print(f"Sample {sample_id} not found in the dataframe.")
+            rows = []
+            for record in sample_statistics.records:
+                rows.append({
+                    "SampleId": int(record.sample_id),
+                    "Label": int(record.sample_label),
+                    "Prediction": int(record.sample_prediction),
+                    "LastLoss": float(record.sample_last_loss),
+                    "Encounters": int(record.sample_encounters),
+                    "Discarded": bool(record.sample_discarded),
+                })
+
             with self.lock:
-                self.samples_df.set_index('SampleId')
+                self.samples_df = pd.DataFrame(rows)
+            
 
         except Exception as e:
-            print("Error processing sample: {}".format(e))
+            print("Error processing sample:", e)
+
+
+
 
     def get_layer_df_row_by_id(self, layer_id: int):
         with self.lock:
@@ -1419,9 +1449,12 @@ def main():
         get_interactive_layers=True,
         # get_data_records="train",
     )
-
+    
     print("[UI] About Fetching initial state.")
-    initial_state_response = stub.ExperimentCommand(get_initial_state_request)
+
+    with ScopeTimer(tag="initial_state_fetch_and_update") as t:
+        initial_state_response = stub.ExperimentCommand(get_initial_state_request)
+    print(t)
     print("[UI] FetchiED initial state.")
     ui_state.update_from_server_state(initial_state_response)
 
@@ -1447,9 +1480,10 @@ def main():
 
             if seconds_passed % 60 == 0:
                 state_request.get_data_records = "train"
-
-            state_response = stub.ExperimentCommand(state_request)
-            ui_state.update_from_server_state(state_response)
+            with ScopeTimer(tag="get_train_data") as t:
+                state_response = stub.ExperimentCommand(state_request)
+                ui_state.update_from_server_state(state_response)
+            print(t)
 
     consistency_thread = threading.Thread(
         target=fetch_server_state_and_update_ui_state)
@@ -1971,7 +2005,7 @@ def main():
         prevent_initial_call=True,
     )
     def update_graph(_, graph_id, checklist):
-        print("update_graph", graph_id, checklist)
+        # print("update_graph", graph_id, checklist)
         nonlocal ui_state
 
         metric_name = graph_id["index"]

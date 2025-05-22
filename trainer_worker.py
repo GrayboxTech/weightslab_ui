@@ -142,20 +142,30 @@ def get_layer_representations(model):
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     print("[BACKEND].get_data_set_representation")
     data_records = ScopeTimer("records.train")
+
     from tqdm import tqdm
-    with data_records:
+
+    with ScopeTimer("datarecords_creation") as t1:
+        all_rows = list(dataset.as_records())
+    print("time to extract data records:", t1)
+
+    with ScopeTimer("records.train") as t2:
         sample_stats = pb2.SampleStatistics()
         sample_stats.origin = "train"
         sample_stats.sample_count = len(dataset.wrapped_dataset)
 
-        for sample_id, row in tqdm(enumerate(dataset.as_records())):
-            sample_stats.sample_label[sample_id] = row['label']
-            sample_stats.sample_prediction[sample_id] = row['predicted_class']
-            sample_stats.sample_last_loss[sample_id] = row['prediction_loss']
-            sample_stats.sample_encounters[sample_id] = row['exposure_amount']
-            sample_stats.sample_discarded[sample_id] = row['deny_listed']
+        for sample_id, row in tqdm(enumerate(all_rows)):
+            record = pb2.RecordMetadata(
+            sample_id=sample_id,
+            sample_label=row['label'],
+            sample_prediction=row['predicted_class'],
+            sample_last_loss=row['prediction_loss'],
+            sample_encounters=row['exposure_amount'],
+            sample_discarded=row['deny_listed']
+        )
+            sample_stats.records.append(record)
 
-    print(data_records)
+    print('time it takes to create datarecords payload', t2)
     return sample_stats
 
 

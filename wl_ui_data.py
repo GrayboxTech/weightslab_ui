@@ -8,6 +8,7 @@ import dash_bootstrap_components as dbc
 from dash import html, dcc, no_update, ctx, dash_table
 from dash.dependencies import Input, Output, State, ALL
 from dash.dash_table.Format import Format, Scheme
+from math import isqrt
 
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
@@ -21,7 +22,9 @@ from weights_lab import (
 )
 
 from scope_timer import ScopeTimer
-update_timer = ScopeTimer(tag="update_train_data_table")
+
+BATCH_SIZE = 5000
+current_batch_index = 0
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -32,16 +35,24 @@ def parse_args():
 args = parse_args()
 channel = grpc.insecure_channel('localhost:50051')
 stub = pb2_grpc.ExperimentServiceStub(channel)
-ui_state = UIState(args.root_directory)
-initial_state = stub.ExperimentCommand(
-    pb2.TrainerCommand(
-        get_hyper_parameters=True,
-        get_interactive_layers=False,
-        get_data_records="train"
-    )
-)
-ui_state.update_from_server_state(initial_state)
 
+ui_state = UIState(args.root_directory)
+
+with ScopeTimer(tag="init_grpc_call") as t:
+    initial_state = stub.ExperimentCommand(
+        pb2.TrainerCommand(
+            get_hyper_parameters=True,
+            get_interactive_layers=False,
+            #get_data_records="train"
+        )
+    )
+    
+print(t)
+
+
+with ScopeTimer(tag="init_ui_state") as t:
+    ui_state.update_from_server_state(initial_state)
+print(t)
 
 def pause_training():
     hyper = pb2.HyperParameters(is_training=False)
@@ -56,17 +67,20 @@ def pause_training():
 
 def refresh_ui_state():
     while True:
-        try:
-            req = pb2.TrainerCommand(
-                get_hyper_parameters=True,
-                get_interactive_layers=False,
-                get_data_records="train"
-            )
-            state = stub.ExperimentCommand(req)
-            ui_state.update_from_server_state(state)
-        except Exception as e:
-            print("Error updating UI state:", e)
-        time.sleep(5)
+        # print('test refresh_ui_state')
+        with ScopeTimer(tag="time took to retrieve full dataset via grpc") as t:
+            try:
+                req = pb2.TrainerCommand(
+                    get_hyper_parameters=True,
+                    get_interactive_layers=False,
+                    get_data_records="train"
+                )
+                state = stub.ExperimentCommand(req)
+                ui_state.update_from_server_state(state)
+            except Exception as e:
+                print("Error updating UI state:", e)
+        #time.sleep(10000)
+        print(t)
 
 
 threading.Thread(target=refresh_ui_state, daemon=True).start()
@@ -199,7 +213,7 @@ def toggle_training(n_clicks):
     prevent_initial_call=True
 )
 def send_to_controller_hyper_parameters_on_change(hyper_param_values, resume_pause_clicks):
-    print(f"[UI] HyperParams Change: {hyper_param_values}, clicks={resume_pause_clicks}")
+    # print(f"[UI] HyperParams Change: {hyper_param_values}, clicks={resume_pause_clicks}")
     if not ctx.triggered:
         return no_update
 
@@ -235,19 +249,50 @@ def send_to_controller_hyper_parameters_on_change(hyper_param_values, resume_pau
     stub.ExperimentCommand(request)
     return button_children
 
+
+# def update_train_data_table(_, chk):
+#     #with ScopeTimer(tag="update_train_data_table") as timer:
+#     if 'refresh_regularly' not in chk:
+#         return no_update
+#     with ScopeTimer(tag="update_train_data_table") as t:
+#         data = ui_state.samples_df.to_dict('records')
+#     print(f'{t}, number of samples: {len(ui_state.samples_df)}')
+#     return data
+
+
+# update train data table in batches
 @app.callback(
     Output('train-data-table', 'data'),
     Input('datatbl-render-freq', 'n_intervals'),
     State('table-refresh-checkbox', 'value')
 )
+
 def update_train_data_table(_, chk):
-    #with ScopeTimer(tag="update_train_data_table") as timer:
+    global current_batch_index
+    # print(ui_state.samples_df.columns)
+    # print(ui_state.samples_df.head())
     if 'refresh_regularly' not in chk:
         return no_update
-    with update_timer:
-        return ui_state.samples_df.to_dict('records')
-    print(update_timer)
 
+    if ui_state.samples_df.empty:
+        return no_update
+
+    total = len(ui_state.samples_df)
+    start = current_batch_index * BATCH_SIZE
+    end = start + BATCH_SIZE
+
+    if start >= total:
+        current_batch_index = 0
+        start = 0
+        end = BATCH_SIZE
+
+    current_batch_index += 1
+
+    with ScopeTimer(tag="time took to convert sample df to records") as t:
+        data = ui_state.samples_df.iloc[start:end].to_dict('records')
+    print(f"{t}, returning rows {start}–{end} of {total}")
+
+    return data
 
 @app.callback(
     Output('train-data-table', 'page_size'),
@@ -256,29 +301,40 @@ def update_train_data_table(_, chk):
 def update_page_size(grid_count):
     return grid_count
 
-
+# New render_visible_sample, use viewport_data instead of viewport_indices to directly access the visible rows
 @app.callback(
     Output('data-panel-col1', 'children', allow_duplicate=True),
-    Input('train-data-table', 'derived_virtual_data'),
-    Input('train-data-table', 'derived_viewport_indices'),
-    Input('grid-preset-dropdown', 'value'),
-    Input('train-data-table', 'selected_rows')
+    Input('train-data-table', 'derived_viewport_data'),
+    Input('train-data-table', 'selected_rows'),
+    Input('sample-inspect-checkboxes', 'value'),
+    prevent_initial_call=True
 )
-def render_visible_samples(virtual_data, viewport_indices, count, selected_rows):
-    if not virtual_data or not viewport_indices:
+def render_visible_samples(viewport_data, selected_rows, inspect_flags):
+    if 'inspect_sample_on_click' not in inspect_flags:
+        return no_update
+
+    if not viewport_data:
         return []
-    from math import isqrt
-    cols = rows = isqrt(count)
-    imgs = []
-    for i in viewport_indices[:count]:
-        row = virtual_data[i]
-        sid = row['SampleId']
-        res = stub.GetSample(pb2.SampleRequest(sample_id=sid, origin='train'))
-        b64 = base64.b64encode(res.data).decode('utf-8')
-        border = '4px solid red' if selected_rows and i in selected_rows else '1px solid #ccc'
-        imgs.append(html.Img(src=f'data:image/png;base64,{b64}', style={
-            'width': 'auto', 'height': 'auto', 'margin': '0.1vh', 'border': border
-        }))
+
+    current_ids = set(ui_state.samples_df['SampleId'].values)
+
+    with ScopeTimer(tag="render_visible_samples") as t:
+        imgs = []
+        for i, row in enumerate(viewport_data):
+            sid = row['SampleId']
+
+            if sid not in current_ids:
+                continue
+
+            res = stub.GetSample(pb2.SampleRequest(sample_id=sid, origin='train'))
+            b64 = base64.b64encode(res.data).decode('utf-8')
+            border = '4px solid red' if selected_rows and i in selected_rows else '1px solid #ccc'
+            imgs.append(html.Img(src=f'data:image/png;base64,{b64}', style={
+                'width': 'auto', 'height': 'auto', 'margin': '0.1vh', 'border': border
+            }))
+    print(t)
+
+    cols = rows = isqrt(len(viewport_data))
     return html.Div(children=imgs, style={
         'display': 'grid',
         'gridTemplateColumns': f'repeat({cols}, 1fr)',
@@ -286,7 +342,7 @@ def render_visible_samples(virtual_data, viewport_indices, count, selected_rows)
         'rowGap': '0.1vh',
         'justifyItems': 'center',
         'alignItems': 'center',
-        'paddingLeft': '0.25vw'
+        'paddingLeft': '0.01vw'
     })
 
 
