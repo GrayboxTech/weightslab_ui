@@ -46,32 +46,19 @@ initial_state = stub.ExperimentCommand(
 
 ui_state.update_from_server_state(initial_state)
 
-def pause_training():
-    hyper = pb2.HyperParameters(is_training=False)
-    cmd = pb2.TrainerCommand(
-        hyper_parameter_change=pb2.HyperParameterCommand(
-            hyper_parameters=hyper
-        )
-    )
-    stub.ExperimentCommand(cmd)
-    time.sleep(0.1)
-
-
 def refresh_ui_state():
     while True:
-        with ScopeTimer(tag="time took to retrieve full dataset via grpc") as t:
-            try:
-                req = pb2.TrainerCommand(
-                    get_hyper_parameters=True,
-                    get_interactive_layers=False,
-                    get_data_records="train"
-                )
-                state = stub.ExperimentCommand(req)
-                ui_state.update_from_server_state(state)
-            except Exception as e:
-                print("Error updating UI state:", e)
-        #time.sleep(5)
-        print(t)
+        try:
+            req = pb2.TrainerCommand(
+                get_hyper_parameters=True,
+                get_interactive_layers=False,
+                get_data_records="train"
+            )
+            state = stub.ExperimentCommand(req)
+            ui_state.update_from_server_state(state)
+        except Exception as e:
+            print("Error updating UI state:", e)
+    #time.sleep(5)
 
 
 threading.Thread(target=refresh_ui_state, daemon=True).start()
@@ -167,7 +154,7 @@ def get_data_tab(ui_state: UIState):
     )
 
 app.layout = html.Div([
-    dcc.Interval(id='datatbl-render-freq', interval=10000, n_intervals=0),
+    dcc.Interval(id='datatbl-render-freq', interval=5000, n_intervals=0),
     get_hyper_params_div(ui_state),
     get_data_tab(ui_state)
 ])
@@ -267,30 +254,28 @@ def render_visible_samples(viewport_data, selected_rows, inspect_flags):
 
     current_ids = set(ui_state.samples_df['SampleId'].values)
 
-    with ScopeTimer(tag="render_visible_samples") as t:
-        imgs = []
-        for i, row in enumerate(viewport_data):
-            sid = row['SampleId']
+    imgs = []
+    for i, row in enumerate(viewport_data):
+        sid = row['SampleId']
 
-            if sid not in current_ids:
-                continue
+        if sid not in current_ids:
+            continue
 
-            res = stub.GetSample(pb2.SampleRequest(sample_id=sid, origin='train'))
-            b64 = base64.b64encode(res.data).decode('utf-8')
-            border = '4px solid red' if selected_rows and i in selected_rows else '1px solid #ccc'
-            imgs.append(html.Img(
-                src=f'data:image/png;base64,{b64}',
-                style={
-                    'width': '128px',             
-                    'height': '128px',
-                    'margin': '0.1vh',
-                    'border': border,
-                    'objectFit': 'contain',       
-                    'imageRendering': 'auto'      
-                }
-            ))
+        res = stub.GetSample(pb2.SampleRequest(sample_id=sid, origin='train'))
+        b64 = base64.b64encode(res.data).decode('utf-8')
+        border = '4px solid red' if selected_rows and i in selected_rows else '1px solid #ccc'
+        imgs.append(html.Img(
+            src=f'data:image/png;base64,{b64}',
+            style={
+                'width': '128px',             
+                'height': '128px',
+                'margin': '0.1vh',
+                'border': border,
+                'objectFit': 'contain',       
+                'imageRendering': 'auto'      
+            }
+        ))
 
-    print(t)
 
     cols = rows = isqrt(len(viewport_data))
     return html.Div(children=imgs, style={
@@ -302,6 +287,42 @@ def render_visible_samples(viewport_data, selected_rows, inspect_flags):
         'alignItems': 'center',
         'paddingLeft': '0.01vw'
     })
+
+
+@app.callback(
+    Input('run-train-data-query', 'n_clicks'),
+    State('train-data-query-input', 'value'),
+    State('data-query-input-weight', 'value'),
+    prevent_initial_call=True
+)
+def run_query_on_dataset(_, query, weight):
+    print('train callback test')
+    if weight is None:
+        weight = 1.0
+
+    try:
+        query_dataframe = ui_state.samples_df.query(query)
+
+        if weight <= 1.0:
+            query_dataframe = query_dataframe.sample(frac=weight)
+        elif isinstance(weight, int):
+            query_dataframe = query_dataframe.sample(n=weight)
+
+        discarded_samples = query_dataframe['SampleId'].to_list()
+        deny_samples_operation = pb2.DenySamplesOperation()
+        deny_samples_operation.sample_ids.extend(discarded_samples)
+        deny_samples_request = pb2.TrainerCommand(
+            deny_samples_operation=deny_samples_operation)
+
+        deny_samples_response = stub.ExperimentCommand(deny_samples_request)
+        print(
+            f"Query: {query}, Weight: {weight}, "
+            f"Response: {deny_samples_response}")
+    except Exception as e:
+        print(f"[ERROR] Query failed: {e}")
+
+    return no_update
+
 
 
 @app.callback(
@@ -317,7 +338,6 @@ def handle_manual_row_deletion(current_data, prev_data, chk):
     curr_ids = {r['SampleId'] for r in current_data}
     removed = prev_ids - curr_ids
     if removed:
-        pause_training()
         stub.ExperimentCommand(
             pb2.TrainerCommand(deny_samples_operation=pb2.DenySamplesOperation(
                 sample_ids=list(removed)
