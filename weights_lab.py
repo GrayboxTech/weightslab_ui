@@ -303,11 +303,8 @@ class UIState:
             server_state.hyper_parameters_descs)
         self.update_neurons_from_server(
             server_state.layer_representations)
-        start = time.time()
         self.update_samples_from_server(
             server_state.sample_statistics)
-        end = time.time()
-        print("Time took to update samples from server", end - start)
 
     def update_hyperparams_from_server(
             self, hyper_parameters_descs: List[pb2.HyperParameterDesc]):
@@ -474,35 +471,6 @@ class UIState:
             self.ant_names.add(status.annotat_status.name)
 
         print("UI.update_metrics_from_server: ", len(self.metrics_df), len(self.annotation), end="\r")
-
-    # old function
-    # def update_samples_from_server(
-    #         self, sample_statistics: pb2.SampleStatistics):
-    #     populate = self.samples_df.empty
-    #     try:
-    #         for sample_id in sample_statistics.sample_label:
-    #             sample_row = [
-    #                 sample_id,
-    #                 sample_statistics.sample_label[sample_id],
-    #                 sample_statistics.sample_prediction[sample_id],
-    #                 sample_statistics.sample_last_loss[sample_id],
-    #                 sample_statistics.sample_encounters[sample_id],
-    #                 sample_statistics.sample_discarded[sample_id],
-    #             ]
-    #             if populate:
-    #                 with self.lock:
-    #                     self.samples_df.loc[len(self.samples_df)] = sample_row
-    #             elif sample_id in self.samples_df.index:
-    #                 with self.lock:
-    #                     self.samples_df.loc[sample_id] = sample_row
-    #             else:
-    #                 print(f"Sample {sample_id} not found in the dataframe.")
-    #         with self.lock:
-    #             self.samples_df.set_index('SampleId')
-
-    #     except Exception as e:
-    #         print("Error processing sample: {}".format(e))
-
 
     # updated function to take lists instead of maps
 

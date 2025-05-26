@@ -22,6 +22,11 @@ message NeuronId {
   int32 neuron_id = 2;
 }
 
+message NeuronConnection {
+  NeuronId from_neuron = 1;
+  NeuronId to_neuron = 2;
+}
+
 enum WeightOperationType {
   ZEROFY = 0;
   REINITIALIZE = 1;
@@ -51,6 +56,8 @@ message WeightOperation {
   optional string sorting_statistic_name = 7;
 
   int32 neurons_to_add = 9;
+
+  repeated NeuronConnection connections_to_zerofy = 10;
 }
 
 message WeightsOperationRequest {
@@ -163,6 +170,13 @@ message RecordMetadata {
 message SampleStatistics {
   optional string origin = 6;
   optional int32 sample_count = 7;
+
+  map<int32, int32> sample_label = 1;
+  map<int32, int32> sample_prediction = 2;
+  map<int32, float> sample_last_loss = 3;
+  map<int32, int32> sample_encounters = 4;
+  map<int32, bool> sample_discarded = 5;
+
   repeated RecordMetadata records = 8;  
 }
 

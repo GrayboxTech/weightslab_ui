@@ -17,6 +17,7 @@ from scope_timer import ScopeTimer
 from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
+# from imagenet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
 
 experiment = get_exp()
@@ -141,31 +142,26 @@ def get_layer_representations(model):
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     print("[BACKEND].get_data_set_representation")
-    data_records = ScopeTimer("records.train")
 
     from tqdm import tqdm
 
-    with ScopeTimer("datarecords_creation") as t1:
-        all_rows = list(dataset.as_records())
-    print("time to extract data records:", t1)
+    all_rows = list(dataset.as_records())
 
-    with ScopeTimer("records.train") as t2:
-        sample_stats = pb2.SampleStatistics()
-        sample_stats.origin = "train"
-        sample_stats.sample_count = len(dataset.wrapped_dataset)
+    sample_stats = pb2.SampleStatistics()
+    sample_stats.origin = "train"
+    sample_stats.sample_count = len(dataset.wrapped_dataset)
 
-        for sample_id, row in tqdm(enumerate(all_rows)):
-            record = pb2.RecordMetadata(
-            sample_id=sample_id,
-            sample_label=row['label'],
-            sample_prediction=row['predicted_class'],
-            sample_last_loss=row['prediction_loss'],
-            sample_encounters=row['exposure_amount'],
-            sample_discarded=row['deny_listed']
-        )
-            sample_stats.records.append(record)
+    for sample_id, row in tqdm(enumerate(all_rows)):
+        record = pb2.RecordMetadata(
+        sample_id=sample_id,
+        sample_label=row['label'],
+        sample_prediction=row['predicted_class'],
+        sample_last_loss=row['prediction_loss'],
+        sample_encounters=row['exposure_amount'],
+        sample_discarded=row['deny_listed']
+    )
+        sample_stats.records.append(record)
 
-    print('time it takes to create datarecords payload', t2)
     return sample_stats
 
 
