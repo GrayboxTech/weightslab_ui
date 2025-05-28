@@ -251,31 +251,42 @@ def render_visible_samples(viewport_data, selected_rows, inspect_flags):
         return []
 
     current_ids = set(ui_state.samples_df['SampleId'].values)
+    sample_ids = [row['SampleId'] for row in viewport_data if row['SampleId'] in current_ids]
+
+    selected_sample_ids = set()
+    if selected_rows:
+        for idx in selected_rows:
+            if 0 <= idx < len(viewport_data):
+                selected_sample_ids.add(viewport_data[idx]['SampleId'])
 
     imgs = []
-    for i, row in enumerate(viewport_data):
-        sid = row['SampleId']
-
-        if sid not in current_ids:
-            continue
-
-        res = stub.GetSample(pb2.SampleRequest(sample_id=sid, origin='train'))
-        b64 = base64.b64encode(res.raw_data).decode('utf-8')
-        border = '4px solid red' if selected_rows and i in selected_rows else '1px solid #ccc'
-        imgs.append(html.Img(
-            src=f'data:image/png;base64,{b64}',
-            style={
-                'width': '128px',             
-                'height': '128px',
-                'margin': '0.1vh',
-                'border': border,
-                'objectFit': 'contain',       
-                'imageRendering': 'auto'      
-            }
+    try:
+        batch_response = stub.GetSamples(pb2.BatchSampleRequest(
+            sample_ids=sample_ids,
+            origin='train'
         ))
 
+        for sample in batch_response.samples:
+            sid = sample.sample_id
+            b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+            border = '4px solid red' if sid in selected_sample_ids else '1px solid #ccc'
+            imgs.append(html.Img(
+                src=f'data:image/png;base64,{b64}',
+                style={
+                    'width': '128px',
+                    'height': '128px',
+                    'margin': '0.1vh',
+                    'border': border,
+                    'objectFit': 'contain',
+                    'imageRendering': 'auto'
+                }
+            ))
+    except Exception as e:
+        print(f"[ERROR] Batch sample rendering failed: {e}")
+        return no_update
 
-    cols = rows = isqrt(len(viewport_data))
+
+    cols = rows = isqrt(len(sample_ids))
     return html.Div(children=imgs, style={
         'display': 'grid',
         'gridTemplateColumns': f'repeat({cols}, 1fr)',

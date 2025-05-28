@@ -352,6 +352,30 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         )
 
         return response
+    
+    def GetSamples(self, request, context):
+        dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
+        response = pb2.BatchSampleResponse()
+
+        for sid in request.sample_ids:
+            try:
+                tensor, _, label = dataset._getitem_raw(sid)
+                transformed = tensor_to_bytes(tensor)
+                raw = load_raw_image(dataset, sid)
+                buf = io.BytesIO()
+                raw.save(buf, format="PNG")
+                sample_response = pb2.SampleRequestResponse(
+                    sample_id=sid,
+                    origin=request.origin,
+                    label=label,
+                    data=transformed,
+                    raw_data=buf.getvalue()
+                )
+                response.samples.append(sample_response)
+            except Exception as e:
+                print(f"[Error] GetSamples({sid}) failed: {e}")
+        return response
+
 
     def ManipulateWeights(self, request, context):
         print(f"ExperimentServiceServicer.ManipulateWeights({request})")

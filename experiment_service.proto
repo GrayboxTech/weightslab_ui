@@ -11,6 +11,9 @@ service ExperimentService {
   rpc GetSample(SampleRequest) returns (SampleRequestResponse);
 
   rpc GetWeights(WeigthsRequest) returns (WeightsResponse);
+
+  rpc GetSamples (BatchSampleRequest) returns (BatchSampleResponse);
+
 }
 
 
@@ -201,6 +204,15 @@ message SampleRequestResponse {
   optional bytes data = 4;
   optional string error_message = 5;
   optional bytes raw_data = 6; 
+}
+
+message BatchSampleRequest {
+  repeated int32 sample_ids = 1;
+  string origin = 2;
+}
+
+message BatchSampleResponse {
+  repeated SampleRequestResponse samples = 1;
 }
 
 message WeigthsRequest{
