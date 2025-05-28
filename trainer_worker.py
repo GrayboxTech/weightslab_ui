@@ -14,10 +14,10 @@ import experiment_service_pb2_grpc as pb2_grpc
 from collections import defaultdict
 
 from scope_timer import ScopeTimer
-from fashion_mnist_exp import get_exp
+# from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-# from imagenet_exp import get_exp
+from imagenet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
 
 experiment = get_exp()
@@ -181,6 +181,26 @@ def tensor_to_bytes(tensor):
     img.save(buf, format='png')
     return buf.getvalue()
 
+def load_raw_image(dataset, index):
+    wrapped = dataset.wrapped_dataset if hasattr(dataset, "wrapped_dataset") else dataset
+
+    if hasattr(wrapped, "data"):
+        # when image is stored in memory
+        np_img = wrapped.data[index]
+        return Image.fromarray(np_img)
+
+    elif hasattr(wrapped, "samples"):
+        # when loading from a path
+        img_path, _ = wrapped.samples[index]
+        return Image.open(img_path).convert("RGB")
+
+    elif hasattr(wrapped, "imgs"):
+        img_path, _ = wrapped.imgs[index]
+        return Image.open(img_path).convert("RGB")
+
+    else:
+        raise ValueError("Dataset type not supported for raw image extraction.")
+
 
 class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
     def StreamStatus(self, request_iterator, context):
@@ -301,15 +321,25 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             return pb2.SampleRequestResponse(
                 error_message=f"Sample {request.sample_id} not found.")
 
-        data, _, label = dataset._getitem_raw(request.sample_id)
-        #TODO: apply transform too
-        image_bytes = tensor_to_bytes(data)
+        transformed_tensor, idx, label = dataset._getitem_raw(request.sample_id)
+        # #TODO: apply transform too
+        
+        transformed_image_bytes = tensor_to_bytes(transformed_tensor)
+
+        try:
+            pil_img = load_raw_image(dataset, request.sample_id)
+            buf = io.BytesIO()
+            pil_img.save(buf, format='PNG')
+            raw_image_bytes = buf.getvalue()
+        except Exception as e:
+            return pb2.SampleRequestResponse(error_message=str(e))
 
         response = pb2.SampleRequestResponse(
             sample_id=request.sample_id,
             origin=request.origin,
             label=label,
-            data=image_bytes,
+            raw_data=raw_image_bytes,         
+            data=transformed_image_bytes, 
         )
 
         return response

@@ -58,7 +58,6 @@ def refresh_ui_state():
             ui_state.update_from_server_state(state)
         except Exception as e:
             print("Error updating UI state:", e)
-    #time.sleep(5)
 
 
 threading.Thread(target=refresh_ui_state, daemon=True).start()
@@ -237,7 +236,6 @@ def update_train_data_table(_, chk):
 def update_page_size(grid_count):
     return grid_count
 
-# New render_visible_sample, use viewport_data instead of viewport_indices to directly access the visible rows
 @app.callback(
     Output('data-panel-col1', 'children', allow_duplicate=True),
     Input('train-data-table', 'derived_viewport_data'),
@@ -262,7 +260,7 @@ def render_visible_samples(viewport_data, selected_rows, inspect_flags):
             continue
 
         res = stub.GetSample(pb2.SampleRequest(sample_id=sid, origin='train'))
-        b64 = base64.b64encode(res.data).decode('utf-8')
+        b64 = base64.b64encode(res.raw_data).decode('utf-8')
         border = '4px solid red' if selected_rows and i in selected_rows else '1px solid #ccc'
         imgs.append(html.Img(
             src=f'data:image/png;base64,{b64}',
@@ -296,7 +294,6 @@ def render_visible_samples(viewport_data, selected_rows, inspect_flags):
     prevent_initial_call=True
 )
 def run_query_on_dataset(_, query, weight):
-    print('train callback test')
     if weight is None:
         weight = 1.0
 
