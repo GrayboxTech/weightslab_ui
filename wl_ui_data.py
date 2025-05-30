@@ -63,6 +63,7 @@ def refresh_ui_state():
 threading.Thread(target=refresh_ui_state, daemon=True).start()
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.ZEPHYR])
+app.config.suppress_callback_exceptions = True
 app.title = "WeightsLab - Dataset Only"
 app.config.prevent_initial_callbacks = 'initial_duplicate'
 
@@ -159,61 +160,54 @@ app.layout = html.Div([
 ])
 
 @app.callback(
-    Output('resume-pause-train-btn', 'children', allow_duplicate=True),
-    Input('resume-pause-train-btn', 'n_clicks'),
-    prevent_initial_call=True
-)
-def toggle_training(n_clicks):
-    is_training = n_clicks % 2 == 1
-    cmd = pb2.TrainerCommand(
-    hyper_parameter_change=pb2.HyperParameterCommand(
-        hyper_parameters=pb2.HyperParameters(is_training=is_training)
-    ))
-    stub.ExperimentCommand(cmd)
-    time.sleep(0.1)
-    return get_pause_button_html_elements() if is_training else get_play_button_html_elements()
+        Output('resume-pause-train-btn', 'children', allow_duplicate=True),
+        Input({"type": "hyper-params-input", "idx": ALL}, "value"),
+        Input('resume-pause-train-btn', 'n_clicks'),
+        prevent_initial_call=True
+    )
+def send_to_controller_hyper_parameters_on_change(
+        hyper_param_values, resume_pause_clicks):
+    print(
+        f"[UI] WeightsLab.send_to_controller_hyper_parameters_on_change"
+        f" {hyper_param_values}, {resume_pause_clicks}")
+    ctx = dash.callback_context
 
-
-@app.callback(
-    Output('resume-pause-train-btn', 'children', allow_duplicate=True),
-    Input({"type": "hyper-params-input", "idx": ALL}, "value"),
-    Input('resume-pause-train-btn', 'n_clicks'),
-    prevent_initial_call=True
-)
-def send_to_controller_hyper_parameters_on_change(hyper_param_values, resume_pause_clicks):
-    # print(f"[UI] HyperParams Change: {hyper_param_values}, clicks={resume_pause_clicks}")
     if not ctx.triggered:
         return no_update
 
-    prop_id = ctx.triggered_id
-    hyper_parameter = pb2.HyperParameters()
     button_children = no_update
+    prop_id = ctx.triggered[0]['prop_id']
+    hyper_parameter = pb2.HyperParameters()
 
-    if prop_id == 'resume-pause-train-btn':
+    if "resume-pause-train-btn" in prop_id:
         is_training = resume_pause_clicks % 2
         hyper_parameter.is_training = is_training
-        hyper_parameter.training_steps_to_do = hyper_param_values[5]
-        button_children = get_pause_button_html_elements() if is_training else get_play_button_html_elements()
-    else:
-        idx = prop_id['idx']
-        if idx == "batch_size":
-            hyper_parameter.batch_size = hyper_param_values[0]
-        elif idx == "checkpooint_frequency":
-            hyper_parameter.checkpont_frequency = hyper_param_values[1]
-        elif idx == "eval_frequency":
-            hyper_parameter.full_eval_frequency = hyper_param_values[2]
-        elif idx == "experiment_name":
-            hyper_parameter.experiment_name = hyper_param_values[3]
-        elif idx == "learning_rate":
-            hyper_parameter.learning_rate = hyper_param_values[4]
-        elif idx == "training_left":
+        if is_training:
+            button_children = get_pause_button_html_elements()
             hyper_parameter.training_steps_to_do = hyper_param_values[5]
+        else:
+            button_children = get_play_button_html_elements()
+            hyper_parameter.training_steps_to_do = 0
+    else:
+        btn_dict = eval(prop_id.split('.')[0])
+        hyper_parameter_id = btn_dict['idx']
+
+        if hyper_parameter_id == "experiment_name":
+            hyper_parameter.experiment_name = hyper_param_values[3]
+        elif hyper_parameter_id == "training_left":
+            hyper_parameter.training_steps_to_do = hyper_param_values[5]
+        elif hyper_parameter_id == "learning_rate":
+            hyper_parameter.learning_rate = hyper_param_values[4]
+        elif hyper_parameter_id == "batch_size":
+            hyper_parameter.batch_size = hyper_param_values[0]
+        elif hyper_parameter_id == "eval_frequency":
+            hyper_parameter.full_eval_frequency = hyper_param_values[2]
+        elif hyper_parameter_id == "checkpooint_frequency":
+            hyper_parameter.checkpont_frequency = hyper_param_values[1]
 
     request = pb2.TrainerCommand(
         hyper_parameter_change=pb2.HyperParameterCommand(
-            hyper_parameters=hyper_parameter
-        )
-    )
+            hyper_parameters=hyper_parameter))
     stub.ExperimentCommand(request)
     return button_children
 
@@ -237,7 +231,7 @@ def update_page_size(grid_count):
     return grid_count
 
 @app.callback(
-    Output('data-panel-col1', 'children', allow_duplicate=True),
+    Output('data-panel-col1', 'children', allow_duplicate= True),
     Input('train-data-table', 'derived_viewport_data'),
     Input('train-data-table', 'selected_rows'),
     Input('sample-inspect-checkboxes', 'value'),
@@ -255,9 +249,10 @@ def render_visible_samples(viewport_data, selected_rows, inspect_flags):
 
     selected_sample_ids = set()
     if selected_rows:
+        df_records = ui_state.samples_df.reset_index(drop=True).to_dict('records')
         for idx in selected_rows:
-            if 0 <= idx < len(viewport_data):
-                selected_sample_ids.add(viewport_data[idx]['SampleId'])
+            if 0 <= idx < len(df_records):
+                selected_sample_ids.add(df_records[idx]['SampleId'])
 
     imgs = []
     try:
