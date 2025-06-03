@@ -120,6 +120,7 @@ message TrainerCommand {
   optional int32 get_single_layer_info_id = 8;
   optional HyperParameterCommand hyper_parameter_change = 1;
   optional DenySamplesOperation deny_samples_operation = 7;
+  optional DenySamplesOperation deny_eval_samples_operation = 10;
   optional LoadCheckpointOperation load_checkpoint_operation = 9;
 }
 

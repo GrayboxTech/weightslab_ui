@@ -41,21 +41,19 @@ initial_state = stub.ExperimentCommand(
         #get_data_records="train"
     )
 )
-
-
-
 ui_state.update_from_server_state(initial_state)
 
 def refresh_ui_state():
     while True:
         try:
-            req = pb2.TrainerCommand(
-                get_hyper_parameters=True,
-                get_interactive_layers=False,
-                get_data_records="train"
-            )
-            state = stub.ExperimentCommand(req)
-            ui_state.update_from_server_state(state)
+            for dataset in ["train", "eval"]:
+                req = pb2.TrainerCommand(
+                    get_hyper_parameters=True,
+                    get_interactive_layers=False,
+                    get_data_records=dataset
+                )
+                state = stub.ExperimentCommand(req)
+                ui_state.update_from_server_state(state)
         except Exception as e:
             print("Error updating UI state:", e)
 
@@ -73,7 +71,15 @@ grid_preset_dropdown = dcc.Dropdown(
     options=[
         {'label': str(x * x), 'value': x * x} for x in [3, 4, 5, 6]
     ],
-    value=16,
+    value=9,
+    clearable=False,
+    style={'width': '6vw'}
+)
+
+eval_grid_dropdown = dcc.Dropdown(
+    id='eval-grid-preset-dropdown',
+    options=[{'label': str(x * x), 'value': x * x} for x in [3, 4, 5, 6]],
+    value=9,
     clearable=False,
     style={'width': '6vw'}
 )
@@ -89,7 +95,7 @@ def get_data_tab(ui_state: UIState):
             spec["format"] = Format(precision=2, scheme=Scheme.fixed)
         cols.append(spec)
 
-    table = dash_table.DataTable(
+    train_table = dash_table.DataTable(
         id='train-data-table',
         data=ui_state.samples_df.to_dict('records'),
         columns=cols,
@@ -110,7 +116,28 @@ def get_data_tab(ui_state: UIState):
         style_cell={'textAlign': 'left', 'minWidth': '4vw', 'maxWidth': '4.5vw'}
     )
 
-    controls = html.Div([
+    eval_table = dash_table.DataTable(
+        id='eval-data-table',
+        data=ui_state.eval_samples_df.to_dict('records'),
+        columns=cols,
+        sort_action="native",
+        page_action="native",
+        page_size=16,
+        row_selectable='multi',
+        row_deletable=True,
+        editable=True,
+        virtualization=True,
+        style_table={
+            'height': '25vh',
+            'overflowY': 'auto',
+            'width': '38vw',
+            'margin': '2px',
+            'padding': '2px'
+        },
+        style_cell={'textAlign': 'left', 'minWidth': '4vw', 'maxWidth': '4.5vw'}
+    )
+
+    train_controls = html.Div([
         dcc.Checklist(
             id='table-refresh-checkbox',
             options=[
@@ -130,28 +157,88 @@ def get_data_tab(ui_state: UIState):
         html.Div(grid_preset_dropdown, style={'marginLeft': '1vw'})
     ], style={'display': 'flex', 'alignItems': 'center', 'gap': '1vw'})
 
-    left = html.Div([
-        html.H2("Train Dataset"),
-        controls,
-        table,
-        get_data_query_input_div(ui_state)
+    eval_controls = html.Div([
+        dcc.Checklist(
+            id='eval-table-refresh-checkbox',
+            options=[
+                {'label': 'Refresh regularly', 'value': 'refresh_regularly'},
+                {'label': 'Discard by flag flip', 'value': 'discard_by_flag_flip'}
+            ],
+            value=['refresh_regularly', 'discard_by_flag_flip'],
+            inline=True,
+            labelStyle={'marginRight': '5px'}
+        ),
+        dcc.Checklist(
+            id='eval-sample-inspect-checkboxes',
+            options=[{'label': 'Inspect on click', 'value': 'inspect_sample_on_click'}],
+            value=[], inline=True,
+            labelStyle={'marginRight': '5px'}
+        ),
+        html.Div(eval_grid_dropdown, style={'marginLeft': '1vw'})
+    ], style={'display': 'flex', 'alignItems': 'center', 'gap': '1vw'})
+
+
+    eval_query_div = dbc.Row([
+        dbc.Col(
+            dbc.Input(
+                id='eval-data-query-input', type='text',
+                placeholder='Enter eval data query',
+                style={'width': '18vw'}
+            ),
+        ),
+        dbc.Col(
+            dbc.Input(
+                id='eval-data-query-weight', type='number',
+                placeholder='weight',
+                style={'width': '4vw'}
+            ),
+        ),
+        dbc.Col(
+            dbc.Button(
+                "Run", id='run-eval-data-query', color='primary',
+                n_clicks=0,
+                style={'width': '3vw'}
+            ),
+        ),
     ])
 
-    right = html.Div(id='data-panel-col1', children=[],
-                style={'overflow': 'auto'})
+    tabs = dcc.Tabs(
+        id='data-tabs',
+        value='train',
+        children=[
+            dcc.Tab(label='Train Dataset', value='train', children=[
+                html.Div([
+                    html.H2("Train Dataset"),
+                    train_controls,
+                    html.Div([
+                        train_table,
+                        html.Div(id='train-sample-panel')
+                    ], style={'display': 'flex', 'gap': '1vw'}),
+                    get_data_query_input_div(ui_state)
+                ])
 
-    return html.Div(
-        dbc.Row([
-            dbc.Col(left, width=8),
-            dbc.Col(right, width=4)
-        ], align='start'),
-        style={
-            'margin': '4vw', 'padding': '2vw',
-            'borderRadius': '15px', 'border': '2px solid #666',
-            'boxShadow': '0 4px 8px rgba(0,0,0,0.1)',
-            'width': '87vw'
-        }
+            ]),
+            dcc.Tab(label='Eval Dataset', value='eval', children=[
+                html.Div([
+                    html.H2("Eval Dataset"),
+                    eval_controls,
+                    html.Div([
+                        eval_table,
+                        html.Div(id='eval-sample-panel')
+                    ], style={'display': 'flex', 'gap': '1vw'}),
+                    eval_query_div
+                ])
+
+            ])
+        ]
     )
+
+    return html.Div(tabs, style={
+        'margin': '4vw', 'padding': '2vw',
+        'borderRadius': '15px', 'border': '2px solid #666',
+        'boxShadow': '0 4px 8px rgba(0,0,0,0.1)',
+        'width': '87vw'
+    })
 
 app.layout = html.Div([
     dcc.Interval(id='datatbl-render-freq', interval=5000, n_intervals=0),
@@ -224,6 +311,16 @@ def update_train_data_table(_, chk):
     return data
 
 @app.callback(
+    Output('eval-data-table', 'data'),
+    Input('datatbl-render-freq', 'n_intervals'),
+    State('table-refresh-checkbox', 'value')
+)
+def update_eval_data_table(_, chk):
+    if 'refresh_regularly' not in chk:
+        return no_update
+    return ui_state.eval_samples_df.to_dict('records')
+
+@app.callback(
     Output('train-data-table', 'page_size'),
     Input('grid-preset-dropdown', 'value')
 )
@@ -231,13 +328,23 @@ def update_page_size(grid_count):
     return grid_count
 
 @app.callback(
-    Output('data-panel-col1', 'children', allow_duplicate= True),
+    Output('eval-data-table', 'page_size'),
+    Input('eval-grid-preset-dropdown', 'value')
+)
+def update_eval_page_size(grid_count):
+    return grid_count
+
+@app.callback(
+    Output('train-sample-panel', 'children', allow_duplicate= True),
     Input('train-data-table', 'derived_viewport_data'),
     Input('train-data-table', 'selected_rows'),
     Input('sample-inspect-checkboxes', 'value'),
+    Input('data-tabs', 'value'),
     prevent_initial_call=True
 )
-def render_visible_samples(viewport_data, selected_rows, inspect_flags):
+def render_visible_train_samples(viewport_data, selected_rows, inspect_flags, active_tab):
+    if active_tab != 'train' or 'inspect_sample_on_click' not in inspect_flags:
+        return no_update
     if 'inspect_sample_on_click' not in inspect_flags:
         return no_update
 
@@ -326,6 +433,103 @@ def run_query_on_dataset(_, query, weight):
 
     return no_update
 
+@app.callback(
+    Output('eval-sample-panel', 'children', allow_duplicate=True),
+    Input('eval-data-table', 'derived_viewport_data'),
+    Input('eval-data-table', 'selected_rows'),
+    Input('eval-sample-inspect-checkboxes', 'value'),
+    Input('data-tabs', 'value'),
+    prevent_initial_call=True
+)
+def render_visible_eval_samples(viewport_data, selected_rows, inspect_flags, active_tab):
+    if active_tab != 'eval' or 'inspect_sample_on_click' not in inspect_flags:
+        return no_update
+    if 'inspect_sample_on_click' not in inspect_flags:
+        return no_update
+
+    if not viewport_data:
+        return []
+
+    current_ids = set(ui_state.eval_samples_df['SampleId'].values)
+    sample_ids = [row['SampleId'] for row in viewport_data if row['SampleId'] in current_ids]
+
+    selected_sample_ids = set()
+    if selected_rows:
+        df_records = ui_state.eval_samples_df.reset_index(drop=True).to_dict('records')
+        for idx in selected_rows:
+            if 0 <= idx < len(df_records):
+                selected_sample_ids.add(df_records[idx]['SampleId'])
+
+    imgs = []
+    try:
+        batch_response = stub.GetSamples(pb2.BatchSampleRequest(
+            sample_ids=sample_ids,
+            origin='eval'
+        ))
+
+        for sample in batch_response.samples:
+            sid = sample.sample_id
+            b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+            border = '4px solid red' if sid in selected_sample_ids else '1px solid #ccc'
+            imgs.append(html.Img(
+                src=f'data:image/png;base64,{b64}',
+                style={
+                    'width': '128px',
+                    'height': '128px',
+                    'margin': '0.1vh',
+                    'border': border,
+                    'objectFit': 'contain',
+                    'imageRendering': 'auto'
+                }
+            ))
+    except Exception as e:
+        print(f"[ERROR] Eval sample rendering failed: {e}")
+        return no_update
+
+    cols = rows = isqrt(len(sample_ids)) or 1
+    return html.Div(children=imgs, style={
+        'display': 'grid',
+        'gridTemplateColumns': f'repeat({cols}, 1fr)',
+        'columnGap': '0.1vw',
+        'rowGap': '0.1vh',
+        'justifyItems': 'center',
+        'alignItems': 'center',
+        'paddingLeft': '0.01vw'
+    })
+
+
+@app.callback(
+    Input('run-eval-data-query', 'n_clicks'),
+    State('eval-data-query-input', 'value'),
+    State('eval-data-query-weight', 'value'),
+    prevent_initial_call=True
+)
+def run_eval_query_on_dataset(_, query, weight):
+    if weight is None:
+        weight = 1.0
+
+    try:
+        query_dataframe = ui_state.eval_samples_df.query(query)
+
+        if weight <= 1.0:
+            query_dataframe = query_dataframe.sample(frac=weight)
+        elif isinstance(weight, int):
+            query_dataframe = query_dataframe.sample(n=weight)
+
+        discarded_samples = query_dataframe['SampleId'].to_list()
+        deny_samples_operation = pb2.DenySamplesOperation()
+        deny_samples_operation.sample_ids.extend(discarded_samples)
+        deny_samples_request = pb2.TrainerCommand(
+            deny_eval_samples_operation=deny_samples_operation)
+
+        deny_samples_response = stub.ExperimentCommand(deny_samples_request)
+        print(
+            f"[Eval Query] {query}, Weight: {weight}, "
+            f"Response: {deny_samples_response}")
+    except Exception as e:
+        print(f"[ERROR] Eval query failed: {e}")
+
+    return no_update
 
 
 @app.callback(
@@ -334,7 +538,7 @@ def run_query_on_dataset(_, query, weight):
     State('train-data-table', 'data_previous'),
     State('table-refresh-checkbox', 'value')
 )
-def handle_manual_row_deletion(current_data, prev_data, chk):
+def handle_manual_train_row_deletion(current_data, prev_data, chk):
     if not prev_data:
         return no_update
     prev_ids = {r['SampleId'] for r in prev_data}
@@ -343,6 +547,32 @@ def handle_manual_row_deletion(current_data, prev_data, chk):
     if removed:
         stub.ExperimentCommand(
             pb2.TrainerCommand(deny_samples_operation=pb2.DenySamplesOperation(
+                sample_ids=list(removed)
+            ))
+        )
+    if 'discard_by_flag_flip' in chk:
+        for r in prev_data:
+            if r['SampleId'] in removed:
+                r['Discarded'] = True
+        return prev_data
+    return current_data
+
+
+@app.callback(
+    Output('eval-data-table', 'data', allow_duplicate=True),
+    Input('eval-data-table', 'data'),
+    State('eval-data-table', 'data_previous'),
+    State('table-refresh-checkbox', 'value')
+)
+def handle_manual_eval_row_deletion(current_data, prev_data, chk):
+    if not prev_data:
+        return no_update
+    prev_ids = {r['SampleId'] for r in prev_data}
+    curr_ids = {r['SampleId'] for r in current_data}
+    removed = prev_ids - curr_ids
+    if removed:
+        stub.ExperimentCommand(
+            pb2.TrainerCommand(deny_eval_samples_operation=pb2.DenySamplesOperation(
                 sample_ids=list(removed)
             ))
         )

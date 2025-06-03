@@ -148,6 +148,9 @@ class UIState:
         self.annotation = pd.DataFrame(columns=_ANNOTATIONS_DF_COLUMNS)
         # Details about the data
         self.samples_df = pd.DataFrame(columns=_SAMPLES_DF_COLUMNS)
+        # Details about the eval data
+        self.eval_samples_df = pd.DataFrame(columns=_SAMPLES_DF_COLUMNS)
+
 
         self.metrics_df_path = os.path.join(
             self.root_directory, "statuses_df.csv")
@@ -488,7 +491,13 @@ class UIState:
                 })
 
             with self.lock:
-                self.samples_df = pd.DataFrame(rows)
+                # self.samples_df = pd.DataFrame(rows)
+
+                if sample_statistics.origin == "train":
+                    self.samples_df = pd.DataFrame(rows)
+                elif sample_statistics.origin == "eval":
+                    self.eval_samples_df = pd.DataFrame(rows)
+
             
 
         except Exception as e:

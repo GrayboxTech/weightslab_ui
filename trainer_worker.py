@@ -28,7 +28,7 @@ experiment.set_is_training(True)
 
 def training_thread_callback():
     while True:
-        print("Training thread callback ", str(experiment), end="\r")
+        # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
 
@@ -143,7 +143,7 @@ def get_layer_representations(model):
 
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
-    print("[BACKEND].get_data_set_representation")
+    # print("[BACKEND].get_data_set_representation")
 
     from tqdm import tqdm
 
@@ -244,7 +244,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             yield training_status
 
     def ExperimentCommand(self, request, context):
-        print("ExperimentServiceServicer.ExperimentCommand", request)
+        # print("ExperimentServiceServicer.ExperimentCommand", request)
         if request.HasField('hyper_parameter_change'):
             # TODO(rotaru): handle this request
             hyper_parameters = request.hyper_parameter_change.hyper_parameters
@@ -272,7 +272,14 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             experiment.train_loader.dataset.denylist_samples(
                 set(request.deny_samples_operation.sample_ids))
             return pb2.CommandResponse(
-                success=True, message=f"Denied {denied_cnt} samples")
+                success=True, message=f"Denied {denied_cnt} train samples")
+        if request.HasField('deny_eval_samples_operation'):
+            denied_cnt = len(request.deny_eval_samples_operation.sample_ids)
+            experiment.eval_loader.dataset.denylist_samples(
+                set(request.deny_eval_samples_operation.sample_ids))
+            return pb2.CommandResponse(
+                success=True, message=f"Denied {denied_cnt} eval samples")
+
         if request.HasField('load_checkpoint_operation'):
             checkpoint_id = request.load_checkpoint_operation.checkpoint_id
             experiment.load(checkpoint_id)
@@ -296,11 +303,17 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 response.sample_statistics.CopyFrom(
                     get_data_set_representation(
                         experiment.train_loader.dataset))
+                response.sample_statistics.origin = "train"
+            elif request.get_data_records == "eval":
+                response.sample_statistics.CopyFrom(
+                    get_data_set_representation(
+                        experiment.eval_loader.dataset))
+                response.sample_statistics.origin = "eval"
 
         return response
 
     def GetSample(self, request, context):
-        print(f"ExperimentServiceServicer.GetSample({request})")
+        # print(f"ExperimentServiceServicer.GetSample({request})")
 
         if not request.HasField('sample_id') or not request.HasField('origin'):
             return pb2.SampleRequestResponse(
@@ -328,9 +341,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             return pb2.SampleRequestResponse(
                 error_message=f"Sample {request.sample_id} not found.")
 
-        with ScopeTimer('time: getiteam_raw') as t:
-            transformed_tensor, idx, label = dataset._getitem_raw(request.sample_id)
-        print(t)
+        transformed_tensor, idx, label = dataset._getitem_raw(request.sample_id)
         # #TODO: apply transform too
         
         transformed_image_bytes = tensor_to_bytes(transformed_tensor)
@@ -378,7 +389,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
 
     def ManipulateWeights(self, request, context):
-        print(f"ExperimentServiceServicer.ManipulateWeights({request})")
+        # (f"ExperimentServiceServicer.ManipulateWeights({request})")
         answer = pb2.WeightsOperationResponse(
             success=False, message="Unknown error")
         weight_operations = request.weight_operation
@@ -439,7 +450,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         return answer
 
     def GetWeights(self, request, context):
-        print(f"ExperimentServiceServicer.GetWeights({request})")
+        # print(f"ExperimentServiceServicer.GetWeights({request})")
         answer = pb2.WeightsResponse(success=True, error_messages="")
 
         neuron_id = request.neuron_id
