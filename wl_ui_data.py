@@ -16,7 +16,6 @@ from weights_lab import (
     UIState,
     get_play_button_html_elements,
     get_pause_button_html_elements,
-    get_data_query_input_div,
     get_hyper_params_div,
     _DISPLAY_COLUMNS,
 )
@@ -178,6 +177,31 @@ def get_data_tab(ui_state: UIState):
     ], style={'display': 'flex', 'alignItems': 'center', 'gap': '1vw'})
 
 
+    train_query_div = dbc.Row([
+    dbc.Col(
+        dbc.Input(
+            id='train-data-query-input', type='text',
+            placeholder='Enter train data query',
+            style={'width': '18vw'}
+        ),
+    ),
+    dbc.Col(
+        dbc.Input(
+            id='data-query-input-weight', type='number',
+            placeholder='weight',
+            style={'width': '4vw'}
+        ),
+    ),
+    dbc.Col(
+        dbc.Button(
+            "Run", id='run-train-data-query', color='primary',
+            n_clicks=0,
+            style={'width': '3vw'}
+        ),
+    ),
+])
+
+
     eval_query_div = dbc.Row([
         dbc.Col(
             dbc.Input(
@@ -214,7 +238,7 @@ def get_data_tab(ui_state: UIState):
                         train_table,
                         html.Div(id='train-sample-panel')
                     ], style={'display': 'flex', 'gap': '1vw'}),
-                    get_data_query_input_div(ui_state)
+                    train_query_div
                 ])
 
             ]),
