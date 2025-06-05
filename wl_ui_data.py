@@ -9,7 +9,7 @@ from dash import html, dcc, no_update, ctx, dash_table
 from dash.dependencies import Input, Output, State, ALL
 from dash.dash_table.Format import Format, Scheme
 from math import isqrt
-
+import re
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 from weights_lab import (
@@ -267,7 +267,9 @@ def get_data_tab(ui_state: UIState):
 app.layout = html.Div([
     dcc.Interval(id='datatbl-render-freq', interval=5000, n_intervals=0),
     get_hyper_params_div(ui_state),
-    get_data_tab(ui_state)
+    get_data_tab(ui_state),
+    dcc.Store(id='train-sort-store', data=None),
+    dcc.Store(id='eval-sort-store', data=None),
 ])
 
 @app.callback(
@@ -325,24 +327,43 @@ def send_to_controller_hyper_parameters_on_change(
 @app.callback(
     Output('train-data-table', 'data'),
     Input('datatbl-render-freq', 'n_intervals'),
-    State('table-refresh-checkbox', 'value')
+    State('table-refresh-checkbox', 'value'),
+    State('train-sort-store', 'data'),
 )
-
-def update_train_data_table(_, chk):
+def update_train_data_table(_, chk, sort_info):
     if 'refresh_regularly' not in chk:
         return no_update
-    data = ui_state.samples_df.to_dict('records')
-    return data
+
+    df = ui_state.samples_df
+    with ScopeTimer('Table sort query') as t:
+        if sort_info:
+            try:
+                df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
+            except Exception as e:
+                print(f"[ERROR] Failed to sort train data: {e}")
+
+    print(t)
+    return df.to_dict('records')
+
+
 
 @app.callback(
     Output('eval-data-table', 'data'),
     Input('datatbl-render-freq', 'n_intervals'),
-    State('table-refresh-checkbox', 'value')
+    State('table-refresh-checkbox', 'value'),
+    State('eval-sort-store', 'data'),
 )
-def update_eval_data_table(_, chk):
+def update_eval_data_table(_, chk, sort_info):
     if 'refresh_regularly' not in chk:
         return no_update
-    return ui_state.eval_samples_df.to_dict('records')
+
+    df = ui_state.eval_samples_df
+    if sort_info:
+        try:
+            df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
+        except Exception as e:
+            print(f"[ERROR] Failed to sort eval data: {e}")
+    return df.to_dict('records')
 
 @app.callback(
     Output('train-data-table', 'page_size'),
@@ -431,6 +452,9 @@ def render_visible_train_samples(viewport_data, selected_rows, inspect_flags, ac
     prevent_initial_call=True
 )
 def run_query_on_dataset(_, query, weight):
+    if 'sortby' in query.lower():
+        return no_update
+    
     if weight is None:
         weight = 1.0
 
@@ -529,6 +553,9 @@ def render_visible_eval_samples(viewport_data, selected_rows, inspect_flags, act
     prevent_initial_call=True
 )
 def run_eval_query_on_dataset(_, query, weight):
+    if 'sortby' in query.lower():
+        return no_update
+    
     if weight is None:
         weight = 1.0
 
@@ -606,6 +633,61 @@ def handle_manual_eval_row_deletion(current_data, prev_data, chk):
                 r['Discarded'] = True
         return prev_data
     return current_data
+
+
+@app.callback(
+    Output('train-sort-store', 'data'),
+    Input('run-train-data-query', 'n_clicks'),
+    State('train-data-query-input', 'value'),
+    prevent_initial_call=True
+)
+def sort_train_table(_, query):
+    if not query:
+        return None
+
+    match = re.search(r'sortby\s+([a-zA-Z0-9_, \s]+)', query, re.IGNORECASE)
+    if not match:
+        return None
+
+    cols, dirs = [], []
+
+    for part in match.group(1).split(','):
+        tokens = part.strip().split()
+        if not tokens:
+            continue
+        col = tokens[0]
+        direction = tokens[1].lower() if len(tokens) > 1 and tokens[1].lower() in ['asc', 'desc'] else 'asc'
+        cols.append(col)
+        dirs.append(direction == 'asc')
+
+    return {'cols': cols, 'dirs': dirs} if cols else None
+
+@app.callback(
+    Output('eval-sort-store', 'data'),
+    Input('run-eval-data-query', 'n_clicks'),
+    State('eval-data-query-input', 'value'),
+    prevent_initial_call=True
+)
+def sort_eval_table(_, query):
+    if not query:
+        return None
+
+    match = re.search(r'sortby\s+([a-zA-Z0-9_, \s]+)', query, re.IGNORECASE)
+    if not match:
+        return None
+
+    cols, dirs = [], []
+
+    for part in match.group(1).split(','):
+        tokens = part.strip().split()
+        if not tokens:
+            continue
+        col = tokens[0]
+        direction = tokens[1].lower() if len(tokens) > 1 and tokens[1].lower() in ['asc', 'desc'] else 'asc'
+        cols.append(col)
+        dirs.append(direction == 'asc')
+
+    return {'cols': cols, 'dirs': dirs} if cols else None
 
 
 if __name__ == '__main__':
