@@ -270,6 +270,7 @@ app.layout = html.Div([
     get_data_tab(ui_state),
     dcc.Store(id='train-sort-store', data=None),
     dcc.Store(id='eval-sort-store', data=None),
+    dcc.Store(id='highlighted-sample-ids', data=[]),
 ])
 
 @app.callback(
@@ -385,9 +386,10 @@ def update_eval_page_size(grid_count):
     Input('train-data-table', 'selected_rows'),
     Input('sample-inspect-checkboxes', 'value'),
     Input('data-tabs', 'value'),
+    Input('highlighted-sample-ids', 'data'),
     prevent_initial_call=True
 )
-def render_visible_train_samples(viewport_data, selected_rows, inspect_flags, active_tab):
+def render_visible_train_samples(viewport_data, selected_rows, inspect_flags, active_tab, selected_sample_ids_from_store):
     if active_tab != 'train' or 'inspect_sample_on_click' not in inspect_flags:
         return no_update
     if 'inspect_sample_on_click' not in inspect_flags:
@@ -399,7 +401,7 @@ def render_visible_train_samples(viewport_data, selected_rows, inspect_flags, ac
     current_ids = set(ui_state.samples_df['SampleId'].values)
     sample_ids = [row['SampleId'] for row in viewport_data if row['SampleId'] in current_ids]
 
-    selected_sample_ids = set()
+    selected_sample_ids = set(selected_sample_ids_from_store)
     if selected_rows:
         df_records = ui_state.samples_df.reset_index(drop=True).to_dict('records')
         for idx in selected_rows:
@@ -487,9 +489,10 @@ def run_query_on_dataset(_, query, weight):
     Input('eval-data-table', 'selected_rows'),
     Input('eval-sample-inspect-checkboxes', 'value'),
     Input('data-tabs', 'value'),
+    Input('highlighted-sample-ids', 'data'),
     prevent_initial_call=True
 )
-def render_visible_eval_samples(viewport_data, selected_rows, inspect_flags, active_tab):
+def render_visible_eval_samples(viewport_data, selected_rows, inspect_flags, active_tab, selected_sample_ids_from_store):
     if active_tab != 'eval' or 'inspect_sample_on_click' not in inspect_flags:
         return no_update
     if 'inspect_sample_on_click' not in inspect_flags:
@@ -501,7 +504,7 @@ def render_visible_eval_samples(viewport_data, selected_rows, inspect_flags, act
     current_ids = set(ui_state.eval_samples_df['SampleId'].values)
     sample_ids = [row['SampleId'] for row in viewport_data if row['SampleId'] in current_ids]
 
-    selected_sample_ids = set()
+    selected_sample_ids = set(selected_sample_ids_from_store)
     if selected_rows:
         df_records = ui_state.eval_samples_df.reset_index(drop=True).to_dict('records')
         for idx in selected_rows:
@@ -688,6 +691,17 @@ def sort_eval_table(_, query):
         dirs.append(direction == 'asc')
 
     return {'cols': cols, 'dirs': dirs} if cols else None
+
+@app.callback(
+    Output('highlighted-sample-ids', 'data'),
+    Input('train-data-table', 'selected_rows'),
+    State('train-data-table', 'data'),
+    prevent_initial_call=True
+)
+def store_highlighted_samples(selected_rows, table_data):
+    if not selected_rows or not table_data:
+        return []
+    return [table_data[i]['SampleId'] for i in selected_rows]
 
 
 if __name__ == '__main__':
