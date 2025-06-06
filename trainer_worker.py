@@ -19,6 +19,7 @@ from scope_timer import ScopeTimer
 # from cifar_exp import get_exp
 from imagenet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
+# from imagenet_effnet_exp import get_exp
 
 with ScopeTimer("fetching experiment") as t:
     experiment = get_exp()
@@ -31,6 +32,7 @@ def training_thread_callback():
         # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
+            print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
 
         time.sleep(0.1)
 
@@ -214,6 +216,9 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         global experiment
         while True:
             log = experiment.logger.queue.get()
+            if "metric_name" in log and "acc" in log["metric_name"]:
+                print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
+
             if log is None:
                 break
             metrics_status, annotat_status = None, None
@@ -279,6 +284,18 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 set(request.deny_eval_samples_operation.sample_ids))
             return pb2.CommandResponse(
                 success=True, message=f"Denied {denied_cnt} eval samples")
+
+        if request.HasField('remove_from_denylist_operation'):
+            allowed = set(request.remove_from_denylist_operation.sample_ids)
+            experiment.train_loader.dataset.allowlist_samples(allowed)
+            return pb2.CommandResponse(
+                success=True, message=f"Un-denied {len(allowed)} train samples")
+
+        if request.HasField('remove_eval_from_denylist_operation'):
+            allowed = set(request.remove_eval_from_denylist_operation.sample_ids)
+            experiment.eval_loader.dataset.allowlist_samples(allowed)
+            return pb2.CommandResponse(
+                success=True, message=f"Un-denied {len(allowed)} eval samples")
 
         if request.HasField('load_checkpoint_operation'):
             checkpoint_id = request.load_checkpoint_operation.checkpoint_id

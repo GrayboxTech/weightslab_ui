@@ -122,6 +122,8 @@ message TrainerCommand {
   optional DenySamplesOperation deny_samples_operation = 7;
   optional DenySamplesOperation deny_eval_samples_operation = 10;
   optional LoadCheckpointOperation load_checkpoint_operation = 9;
+  optional DenySamplesOperation remove_from_denylist_operation = 11;
+  optional DenySamplesOperation remove_eval_from_denylist_operation = 12;
 }
 
 message HyperParameterDesc {
