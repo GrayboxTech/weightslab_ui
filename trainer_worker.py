@@ -17,14 +17,14 @@ from scope_timer import ScopeTimer
 # from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-from imagenet_exp import get_exp
+# from imagenet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
 
-with ScopeTimer("fetching experiment") as t:
-    experiment = get_exp()
-print(t)
-experiment.set_is_training(True)
+from cad_models_exp import get_exp
+
+experiment = get_exp()
+# experiment.set_is_training(True)
 
 
 def training_thread_callback():
@@ -33,8 +33,6 @@ def training_thread_callback():
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
             print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
-
-        time.sleep(0.1)
 
 
 training_thread = Thread(target=training_thread_callback)
@@ -147,15 +145,13 @@ def get_layer_representations(model):
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     # print("[BACKEND].get_data_set_representation")
 
-    from tqdm import tqdm
-
     all_rows = list(dataset.as_records())
 
     sample_stats = pb2.SampleStatistics()
     sample_stats.origin = "train"
     sample_stats.sample_count = len(dataset.wrapped_dataset)
 
-    for sample_id, row in tqdm(enumerate(all_rows)):
+    for sample_id, row in enumerate(all_rows):
         record = pb2.RecordMetadata(
         sample_id=sample_id,
         sample_label=row['label'],

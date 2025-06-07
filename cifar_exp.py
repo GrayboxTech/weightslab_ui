@@ -26,21 +26,6 @@ from weightslab.tracking import add_tracked_attrs_to_input_tensor
 
 from board import Dash
 
-
-        #         # print("Model.forward", self.seen_samples)
-        #         self.maybe_update_age(xb)
-        #         out = self.conv1(xb)
-        #         out = self.conv2(out)
-        #         out = self.res1(out)# + out
-        #         out = self.conv3(out)
-        #         out = self.conv4(out)
-        #         out = self.res2(out)# + out
-        #         out = self.conv5(out)
-        #         out = self.res3(out)# + out
-        #         out = self.classifier(out)
-        #         return out
-
-
 class SmallCIFARNet(NetworkWithOps, nn.Module):
     def __init__(self):
         super(SmallCIFARNet, self).__init__()

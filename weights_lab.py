@@ -41,6 +41,10 @@ from scope_timer import ScopeTimer
 from dataclasses import dataclass
 
 
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+lock = threading.Lock()
+
+
 _HYPERPARAM_COLUMNS = ["label", "type", "name", "value"]
 
 _NEURONS_DF_COLUMNS = [
@@ -210,7 +214,7 @@ class UIState:
     def get_layers_df(self):
         with self.lock:
             return self.layers_df
-    
+
     def get_plots_for_exp_name_metric_name(
             self, metric_name, exp_name):
 
@@ -1385,8 +1389,7 @@ def get_ui_app_layout(ui_state: UIState) -> html.Div:
     return html.Div(children=layout_children)
 
 
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
-lock = threading.Lock()
+
 
 
 def parse_args():
