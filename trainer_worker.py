@@ -14,19 +14,25 @@ import experiment_service_pb2_grpc as pb2_grpc
 from collections import defaultdict
 
 from scope_timer import ScopeTimer
-from fashion_mnist_exp import get_exp
+# from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-# from nano_llm_exp import get_exp
+from imagenet_exp import get_exp
+# from mnist_exp_fully_conv import get_exp
+# from imagenet_effnet_exp import get_exp
 
-experiment = get_exp()
+with ScopeTimer("fetching experiment") as t:
+    experiment = get_exp()
+print(t)
+experiment.set_is_training(True)
 
 
 def training_thread_callback():
     while True:
-        print("Training thread callback ", str(experiment), end="\r")
+        # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
+            print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
 
         time.sleep(0.1)
 
@@ -139,22 +145,27 @@ def get_layer_representations(model):
 
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
-    print("[BACKEND].get_data_set_representation")
-    data_records = ScopeTimer("records.train")
+    # print("[BACKEND].get_data_set_representation")
+
     from tqdm import tqdm
-    with data_records:
-        sample_stats = pb2.SampleStatistics()
-        sample_stats.origin = "train"
-        sample_stats.sample_count = len(dataset.wrapped_dataset)
 
-        for sample_id, row in tqdm(enumerate(dataset.as_records())):
-            sample_stats.sample_label[sample_id] = row['label']
-            sample_stats.sample_prediction[sample_id] = row['predicted_class']
-            sample_stats.sample_last_loss[sample_id] = row['prediction_loss']
-            sample_stats.sample_encounters[sample_id] = row['exposure_amount']
-            sample_stats.sample_discarded[sample_id] = row['deny_listed']
+    all_rows = list(dataset.as_records())
 
-    print(data_records)
+    sample_stats = pb2.SampleStatistics()
+    sample_stats.origin = "train"
+    sample_stats.sample_count = len(dataset.wrapped_dataset)
+
+    for sample_id, row in tqdm(enumerate(all_rows)):
+        record = pb2.RecordMetadata(
+        sample_id=sample_id,
+        sample_label=row['label'],
+        sample_prediction=row['predicted_class'],
+        sample_last_loss=row['prediction_loss'],
+        sample_encounters=row['exposure_amount'],
+        sample_discarded=row['deny_listed']
+    )
+        sample_stats.records.append(record)
+
     return sample_stats
 
 
@@ -174,12 +185,40 @@ def tensor_to_bytes(tensor):
     img.save(buf, format='png')
     return buf.getvalue()
 
+def load_raw_image(dataset, index):
+    wrapped = dataset.wrapped_dataset if hasattr(dataset, "wrapped_dataset") else dataset
+
+    if hasattr(wrapped, "data"):
+        np_img = wrapped.data[index]
+        if hasattr(np_img, 'numpy'):
+            np_img = np_img.numpy()  
+        if np_img.ndim == 2:
+            return Image.fromarray(np_img.astype(np.uint8), mode="L")
+        elif np_img.ndim == 3:
+            return Image.fromarray(np_img.astype(np.uint8), mode="RGB")
+        else:
+            raise ValueError(f"Unsupported image shape: {np_img.shape}")
+
+    elif hasattr(wrapped, "samples") or hasattr(wrapped, "imgs"):
+        if hasattr(wrapped, "samples"):
+            img_path, _ = wrapped.samples[index]
+        else:
+            img_path, _ = wrapped.imgs[index]
+        img = Image.open(img_path)
+        return img.convert("L") if img.mode in ["1", "L", "I;16", "I"] else img.convert("RGB")
+
+    else:
+        raise ValueError("Dataset type not supported for raw image extraction.")
+
 
 class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
     def StreamStatus(self, request_iterator, context):
         global experiment
         while True:
             log = experiment.logger.queue.get()
+            if "metric_name" in log and "acc" in log["metric_name"]:
+                print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
+
             if log is None:
                 break
             metrics_status, annotat_status = None, None
@@ -210,7 +249,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             yield training_status
 
     def ExperimentCommand(self, request, context):
-        print("ExperimentServiceServicer.ExperimentCommand", request)
+        # print("ExperimentServiceServicer.ExperimentCommand", request)
         if request.HasField('hyper_parameter_change'):
             # TODO(rotaru): handle this request
             hyper_parameters = request.hyper_parameter_change.hyper_parameters
@@ -238,7 +277,26 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             experiment.train_loader.dataset.denylist_samples(
                 set(request.deny_samples_operation.sample_ids))
             return pb2.CommandResponse(
-                success=True, message=f"Denied {denied_cnt} samples")
+                success=True, message=f"Denied {denied_cnt} train samples")
+        if request.HasField('deny_eval_samples_operation'):
+            denied_cnt = len(request.deny_eval_samples_operation.sample_ids)
+            experiment.eval_loader.dataset.denylist_samples(
+                set(request.deny_eval_samples_operation.sample_ids))
+            return pb2.CommandResponse(
+                success=True, message=f"Denied {denied_cnt} eval samples")
+
+        if request.HasField('remove_from_denylist_operation'):
+            allowed = set(request.remove_from_denylist_operation.sample_ids)
+            experiment.train_loader.dataset.allowlist_samples(allowed)
+            return pb2.CommandResponse(
+                success=True, message=f"Un-denied {len(allowed)} train samples")
+
+        if request.HasField('remove_eval_from_denylist_operation'):
+            allowed = set(request.remove_eval_from_denylist_operation.sample_ids)
+            experiment.eval_loader.dataset.allowlist_samples(allowed)
+            return pb2.CommandResponse(
+                success=True, message=f"Un-denied {len(allowed)} eval samples")
+
         if request.HasField('load_checkpoint_operation'):
             checkpoint_id = request.load_checkpoint_operation.checkpoint_id
             experiment.load(checkpoint_id)
@@ -256,16 +314,23 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             else:
                 response.layer_representations.extend(
                     get_layer_representations(experiment.model))
+                # print(response)
         if request.get_data_records:
             if request.get_data_records == "train":
                 response.sample_statistics.CopyFrom(
                     get_data_set_representation(
                         experiment.train_loader.dataset))
+                response.sample_statistics.origin = "train"
+            elif request.get_data_records == "eval":
+                response.sample_statistics.CopyFrom(
+                    get_data_set_representation(
+                        experiment.eval_loader.dataset))
+                response.sample_statistics.origin = "eval"
 
         return response
 
     def GetSample(self, request, context):
-        print(f"ExperimentServiceServicer.GetSample({request})")
+        # print(f"ExperimentServiceServicer.GetSample({request})")
 
         if not request.HasField('sample_id') or not request.HasField('origin'):
             return pb2.SampleRequestResponse(
@@ -293,21 +358,55 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             return pb2.SampleRequestResponse(
                 error_message=f"Sample {request.sample_id} not found.")
 
-        data, _, label = dataset._getitem_raw(request.sample_id)
-        #TODO: apply transform too
-        image_bytes = tensor_to_bytes(data)
+        transformed_tensor, idx, label = dataset._getitem_raw(request.sample_id)
+        # #TODO: apply transform too
+        
+        transformed_image_bytes = tensor_to_bytes(transformed_tensor)
+
+        try:
+            pil_img = load_raw_image(dataset, request.sample_id)
+            buf = io.BytesIO()
+            pil_img.save(buf, format='PNG')
+            raw_image_bytes = buf.getvalue()
+        except Exception as e:
+            return pb2.SampleRequestResponse(error_message=str(e))
 
         response = pb2.SampleRequestResponse(
             sample_id=request.sample_id,
             origin=request.origin,
             label=label,
-            data=image_bytes,
+            raw_data=raw_image_bytes,         
+            data=transformed_image_bytes, 
         )
 
         return response
+    
+    def GetSamples(self, request, context):
+        dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
+        response = pb2.BatchSampleResponse()
+
+        for sid in request.sample_ids:
+            try:
+                tensor, _, label = dataset._getitem_raw(sid)
+                transformed = tensor_to_bytes(tensor)
+                raw = load_raw_image(dataset, sid)
+                buf = io.BytesIO()
+                raw.save(buf, format="PNG")
+                sample_response = pb2.SampleRequestResponse(
+                    sample_id=sid,
+                    origin=request.origin,
+                    label=label,
+                    data=transformed,
+                    raw_data=buf.getvalue()
+                )
+                response.samples.append(sample_response)
+            except Exception as e:
+                print(f"[Error] GetSamples({sid}) failed: {e}")
+        return response
+
 
     def ManipulateWeights(self, request, context):
-        print(f"ExperimentServiceServicer.ManipulateWeights({request})")
+        # (f"ExperimentServiceServicer.ManipulateWeights({request})")
         answer = pb2.WeightsOperationResponse(
             success=False, message="Unknown error")
         weight_operations = request.weight_operation
@@ -358,10 +457,17 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             answer = pb2.WeightsOperationResponse(
                 success=True,
                 message=f"Reinitialized {weight_operations.neuron_ids}")
+            
+        elif weight_operations.op_type == pb2.WeightOperationType.ZEROFY:
+            experiment.model.zerofy(layer_id=weight_operations.layer_id)
+            answer = pb2.WeightsOperationResponse(
+                success=True,
+                message=f"Zerofy applied to new neurons in layer {weight_operations.layer_id}")
+
         return answer
 
     def GetWeights(self, request, context):
-        print(f"ExperimentServiceServicer.GetWeights({request})")
+        # print(f"ExperimentServiceServicer.GetWeights({request})")
         answer = pb2.WeightsResponse(success=True, error_messages="")
 
         neuron_id = request.neuron_id

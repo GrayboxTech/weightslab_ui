@@ -11,6 +11,9 @@ service ExperimentService {
   rpc GetSample(SampleRequest) returns (SampleRequestResponse);
 
   rpc GetWeights(WeigthsRequest) returns (WeightsResponse);
+
+  rpc GetSamples (BatchSampleRequest) returns (BatchSampleResponse);
+
 }
 
 
@@ -20,6 +23,11 @@ message Empty {}
 message NeuronId {
   int32 layer_id = 1;
   int32 neuron_id = 2;
+}
+
+message NeuronConnection {
+  NeuronId from_neuron = 1;
+  NeuronId to_neuron = 2;
 }
 
 enum WeightOperationType {
@@ -51,6 +59,8 @@ message WeightOperation {
   optional string sorting_statistic_name = 7;
 
   int32 neurons_to_add = 9;
+
+  repeated NeuronConnection connections_to_zerofy = 10;
 }
 
 message WeightsOperationRequest {
@@ -110,7 +120,10 @@ message TrainerCommand {
   optional int32 get_single_layer_info_id = 8;
   optional HyperParameterCommand hyper_parameter_change = 1;
   optional DenySamplesOperation deny_samples_operation = 7;
+  optional DenySamplesOperation deny_eval_samples_operation = 10;
   optional LoadCheckpointOperation load_checkpoint_operation = 9;
+  optional DenySamplesOperation remove_from_denylist_operation = 11;
+  optional DenySamplesOperation remove_eval_from_denylist_operation = 12;
 }
 
 message HyperParameterDesc {
@@ -151,6 +164,15 @@ message LayerRepresentation {
   repeated NeuronStatistics neurons_statistics = 10;
 }
 
+message RecordMetadata {
+  int32 sample_id = 1;
+  int32 sample_label = 2;
+  int32 sample_prediction = 3;
+  float sample_last_loss = 4;
+  int32 sample_encounters = 5;
+  bool sample_discarded = 6;
+}
+
 message SampleStatistics {
   optional string origin = 6;
   optional int32 sample_count = 7;
@@ -160,6 +182,8 @@ message SampleStatistics {
   map<int32, float> sample_last_loss = 3;
   map<int32, int32> sample_encounters = 4;
   map<int32, bool> sample_discarded = 5;
+
+  repeated RecordMetadata records = 8;  
 }
 
 message CommandResponse {
@@ -182,6 +206,16 @@ message SampleRequestResponse {
   optional int32 label = 3;
   optional bytes data = 4;
   optional string error_message = 5;
+  optional bytes raw_data = 6; 
+}
+
+message BatchSampleRequest {
+  repeated int32 sample_ids = 1;
+  string origin = 2;
+}
+
+message BatchSampleResponse {
+  repeated SampleRequestResponse samples = 1;
 }
 
 message WeigthsRequest{

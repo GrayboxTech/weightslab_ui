@@ -43,5 +43,3 @@ for very useful and interesting flows to be performed:
 ![Short Demo 1](screen-shots/reinits.gif)
 
 ![Short Demo 2](screen-shots/data-model-manipulation.gif)
-
-
