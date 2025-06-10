@@ -32,7 +32,7 @@ def training_thread_callback():
         # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
-            print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
+            # print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
 
 
 training_thread = Thread(target=training_thread_callback)
@@ -143,12 +143,10 @@ def get_layer_representations(model):
 
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
-    # print("[BACKEND].get_data_set_representation")
+    # print("[BACKEND].get_data_set_representation", len(dataset.wrapped_dataset))
 
     all_rows = list(dataset.as_records())
-
     sample_stats = pb2.SampleStatistics()
-    sample_stats.origin = "train"
     sample_stats.sample_count = len(dataset.wrapped_dataset)
 
     for sample_id, row in enumerate(all_rows):
@@ -321,6 +319,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     get_layer_representations(experiment.model))
                 # print(response)
         if request.get_data_records:
+            # print(f"ExperimentServiceServicer.get_data_records {request}")
+            # print(f"Experiment: {experiment}")
             if request.get_data_records == "train":
                 response.sample_statistics.CopyFrom(
                     get_data_set_representation(
@@ -336,7 +336,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
     def GetSample(self, request, context):
         # print(f"ExperimentServiceServicer.GetSample({request})")
-
         if not request.HasField('sample_id') or not request.HasField('origin'):
             return pb2.SampleRequestResponse(
                 error_message="Invalid request. Provide sample_id & origin.")
