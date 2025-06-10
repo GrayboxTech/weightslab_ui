@@ -1561,7 +1561,10 @@ def main():
                 state = stub.ExperimentCommand(req)
                 ui_state.update_from_server_state(state)
 
-                req = pb2.TrainerCommand(get_data_records="eval")
+                req = pb2.TrainerCommand(
+                    get_hyper_parameters=True,
+                    get_interactive_layers=False,
+                    get_data_records="eval")
                 state = stub.ExperimentCommand(req)
                 ui_state.update_from_server_state(state)
             except Exception as e:
