@@ -178,7 +178,8 @@ def tensor_to_bytes(tensor):
 
     img = Image.fromarray(np_img, mode=mode)
     buf = io.BytesIO()
-    img.save(buf, format='png')
+    # img.save(buf, format='png')
+    img.save(buf, format='jpeg', quality=85)
     return buf.getvalue()
 
 def load_raw_image(dataset, index):
@@ -370,7 +371,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         try:
             pil_img = load_raw_image(dataset, request.sample_id)
             buf = io.BytesIO()
-            pil_img.save(buf, format='PNG')
+            # pil_img.save(buf, format='PNG')
+            pil_img.save(buf, format='jpeg', quality=85)
             raw_image_bytes = buf.getvalue()
         except Exception as e:
             return pb2.SampleRequestResponse(error_message=str(e))
@@ -395,7 +397,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 transformed = tensor_to_bytes(tensor)
                 raw = load_raw_image(dataset, sid)
                 buf = io.BytesIO()
-                raw.save(buf, format="PNG")
+                # raw.save(buf, format="PNG")
+                raw.save(buf, format='jpeg', quality=85)
                 sample_response = pb2.SampleRequestResponse(
                     sample_id=sid,
                     origin=request.origin,
