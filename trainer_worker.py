@@ -269,9 +269,9 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 experiment.eval_full_to_train_steps_ratio = \
                     hyper_parameters.full_eval_frequency
 
-            if hyper_parameters.HasField('checkpoint_frequency'):
+            if hyper_parameters.HasField('checkpont_frequency'):
                 experiment.experiment_dump_to_train_steps_ratio = \
-                    hyper_parameters.checkpoint_frequency
+                    hyper_parameters.checkpont_frequency
 
             if hyper_parameters.HasField('experiment_name'):
                 experiment.set_name(hyper_parameters.experiment_name)
