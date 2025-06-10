@@ -18,5 +18,5 @@ cifar10*/
 fashion-mnist-demo/*
 hct-dev/*
 root_experiment/*
-*_exp.py
+#*_exp.py
 cad_models/*
