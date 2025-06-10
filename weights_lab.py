@@ -1537,14 +1537,12 @@ def main():
         get_interactive_layers=True,
         get_data_records="train",
     )
-    
-    print("[UI] About Fetching initial state.")
 
     with ScopeTimer(tag="initial_state_fetch_and_update") as t:
         initial_state_response = stub.ExperimentCommand(
             get_initial_state_request)
     print(t)
-    print("[UI] FetchiED initial state.")
+    print("[UI] FetchED initial state.")
     ui_state.update_from_server_state(initial_state_response)
 
     print(ui_state)
