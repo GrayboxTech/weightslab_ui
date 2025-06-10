@@ -87,26 +87,12 @@ class SmallCIFARNet(NetworkWithOps, nn.Module):
         return out
 
 
-transform = T.Compose([T.Resize((256, 256)), T.ToTensor(),])
-
-# Load dataset
-full_dataset = ds.ImageFolder(
-    root="/home/rotaru/Desktop/GRAYBOX/sales/pitch/prepare/cad_models_dataset/",
-    # "cad_models_dataset/",
-    transform=transform)
-
-# Calculate sizes for train and validation sets
-total_size = len(full_dataset)
-train_size = int(0.8 * total_size)
-val_size = total_size - train_size
-
-# Split the dataset
-train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
-train_dataset = train_dataset.dataset
-val_dataset = val_dataset.dataset
-
-# import pdb; pdb.set_trace()
-
+transform = T.Compose([T.Resize((224, 224)), T.ToTensor(),])
+root_dir = "/home/rotaru/Desktop/GRAYBOX/sales/pitch/prepare/cad_models_dataset_split/"
+train_dataset = ds.ImageFolder(
+    os.path.join(root_dir, "train"), transform=transform)
+val_dataset = ds.ImageFolder(
+    os.path.join(root_dir, "val"), transform=transform)
 
 device = th.device("cuda:0")
 
