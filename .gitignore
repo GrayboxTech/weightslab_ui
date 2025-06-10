@@ -19,5 +19,4 @@ cad_models/*
 fashion-mnist-demo/*
 hct-dev/*
 root_experiment/*
-#*_exp.py
-cad_models/*
+*_exp.py
