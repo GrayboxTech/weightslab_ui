@@ -38,7 +38,6 @@ def training_thread_callback():
         # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
-            # print(f"[TRAINING] Remaining steps: {experiment.training_steps_to_do}")
 
 
 training_thread = Thread(target=training_thread_callback)
@@ -186,8 +185,6 @@ def mask_to_png_bytes(mask, num_classes=21):
 
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
-    # print("[BACKEND].get_data_set_representation", len(dataset.wrapped_dataset))
-
     all_rows = list(dataset.as_records())
     sample_stats = pb2.SampleStatistics()
     sample_stats.sample_count = len(dataset.wrapped_dataset)
@@ -392,8 +389,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     get_layer_representations(experiment.model))
                 # print(response)
         if request.get_data_records:
-            # print(f"ExperimentServiceServicer.get_data_records {request}")
-            # print(f"Experiment: {experiment}")
             if request.get_data_records == "train":
                 response.sample_statistics.CopyFrom(
                     get_data_set_representation(
@@ -530,7 +525,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         answer = pb2.WeightsOperationResponse(
             success=False, message="Unknown error")
         weight_operations = request.weight_operation
-        #TODO: All the access of the model should be done via experiment
         #TODO: All the access of the model should be done via experiment
         if weight_operations.op_type == pb2.WeightOperationType.REMOVE_NEURONS:
             layer_id_to_neuron_ids_list = defaultdict(list)
