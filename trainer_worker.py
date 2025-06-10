@@ -264,6 +264,14 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 experiment.set_training_steps_to_do(
                     hyper_parameters.training_steps_to_do)
 
+            if hyper_parameters.HasField('full_eval_frequency'):
+                experiment.eval_full_to_train_steps_ratio = \
+                    hyper_parameters.full_eval_frequency
+
+            if hyper_parameters.HasField('checkpoint_frequency'):
+                experiment.experiment_dump_to_train_steps_ratio = \
+                    hyper_parameters.checkpoint_frequency
+
             if hyper_parameters.HasField('experiment_name'):
                 experiment.set_name(hyper_parameters.experiment_name)
             return pb2.CommandResponse(
