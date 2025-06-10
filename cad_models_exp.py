@@ -87,16 +87,6 @@ class SmallCIFARNet(NetworkWithOps, nn.Module):
         return out
 
 
-<<<<<<< HEAD
-transform = T.Compose([T.Resize((224, 224)), T.ToTensor(),])
-root_dir = "/home/rotaru/Desktop/GRAYBOX/sales/pitch/prepare/cad_models_dataset_split/"
-train_dataset = ds.ImageFolder(
-    os.path.join(root_dir, "train"), transform=transform)
-val_dataset = ds.ImageFolder(
-    os.path.join(root_dir, "val"), transform=transform)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-=======
 transform = T.Compose([T.Resize((256, 256)), T.ToTensor(),])
 
 # Load dataset
@@ -119,7 +109,6 @@ val_dataset = val_dataset.dataset
 
 
 device = th.device("cuda:0")
->>>>>>> 6634baf (Add cad_models_exp temporarily)
 
 def get_exp():
     model = SmallCIFARNet()
