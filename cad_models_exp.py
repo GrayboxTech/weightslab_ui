@@ -94,7 +94,7 @@ train_dataset = ds.ImageFolder(
 val_dataset = ds.ImageFolder(
     os.path.join(root_dir, "val"), transform=transform)
 
-device = th.device("cuda:0")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_exp():
     model = SmallCIFARNet()
