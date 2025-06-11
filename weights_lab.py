@@ -1304,9 +1304,9 @@ def get_data_tab(ui_state: UIState):
         editable=True,
         virtualization=True,
         style_table={
-            'height': '25vh',
+            'height': 'auto',
             'overflowY': 'auto',
-            'width': '38vw',
+            'width': 'auto',
             'margin': '2px',
             'padding': '2px'
         },
@@ -1325,9 +1325,9 @@ def get_data_tab(ui_state: UIState):
         editable=True,
         virtualization=True,
         style_table={
-            'height': '25vh',
+            'height': 'auto',
             'overflowY': 'auto',
-            'width': '38vw',
+            'width': 'auto',
             'margin': '2px',
             'padding': '2px'
         },
@@ -1449,9 +1449,26 @@ def get_data_tab(ui_state: UIState):
                     html.H2("Train Dataset"),
                     train_controls,
                     html.Div([
-                        train_table,
-                        html.Div(id='train-sample-panel')
-                    ], style={'display': 'flex', 'gap': '1vw'}),
+                        html.Div([train_table], style={
+                            'flex': '0 0 35vw', 
+                            'minWidth': '35vw'
+                        }),
+                        html.Div([
+                            html.Div(id='train-sample-panel')
+                        ], style={
+                            'flex': '1', 
+                            'minWidth': '400px', 
+                            'height': 'auto',  
+                            'display': 'flex',
+                            'overflow': 'auto',
+                            'alignItems': 'flex-start',
+                            'justifyContent': 'center'
+                        })
+                    ], style={
+                        'display': 'flex', 
+                        'gap': '1vw',
+                        'width': '100%'
+                    }),
                     train_query_div
                 ])
 
@@ -1461,9 +1478,26 @@ def get_data_tab(ui_state: UIState):
                     html.H2("Eval Dataset"),
                     eval_controls,
                     html.Div([
-                        eval_table,
-                        html.Div(id='eval-sample-panel')
-                    ], style={'display': 'flex', 'gap': '1vw'}),
+                        html.Div([eval_table], style={
+                            'flex': '0 0 35vw',  
+                            'minWidth': '35vw'
+                        }),
+                        html.Div([
+                            html.Div(id='eval-sample-panel')
+                        ], style={
+                            'flex': '1', 
+                            'minWidth': '400px', 
+                            'height': 'auto', 
+                            'overflow': 'auto', 
+                            'display': 'flex',
+                            'alignItems': 'flex-start',
+                            'justifyContent': 'center'
+                        })
+                    ], style={
+                        'display': 'flex', 
+                        'gap': '1vw',
+                        'width': '100%'
+                    }),
                     eval_query_div
                 ])
 
@@ -2138,6 +2172,7 @@ def main():
                         'height': '128px',
                         'margin': '0.1vh',
                         'border': border,
+                        'transition': 'border 0.3s ease-in-out',
                         'objectFit': 'contain',
                         'imageRendering': 'auto'
                     }
@@ -2155,6 +2190,7 @@ def main():
             'rowGap': '0.1vh',
             'justifyItems': 'center',
             'alignItems': 'center',
+            'width': 'auto',
             'paddingLeft': '0.01vw'
         })
 
@@ -2253,6 +2289,7 @@ def main():
                         'height': '128px',
                         'margin': '0.1vh',
                         'border': border,
+                        'transition': 'border 0.3s ease-in-out',
                         'objectFit': 'contain',
                         'imageRendering': 'auto'
                     }
@@ -2267,6 +2304,7 @@ def main():
             'gridTemplateColumns': f'repeat({cols}, 1fr)',
             'columnGap': '0.1vw',
             'rowGap': '0.1vh',
+            'width': 'auto',
             'justifyItems': 'center',
             'alignItems': 'center',
             'paddingLeft': '0.01vw'
@@ -2432,13 +2470,19 @@ def main():
     @app.callback(
         Output('highlighted-sample-ids', 'data'),
         Input('train-data-table', 'selected_rows'),
+        Input('eval-data-table', 'selected_rows'),
         State('train-data-table', 'data'),
+        State('eval-data-table', 'data'),
+        State('data-tabs', 'value'),
         prevent_initial_call=True
     )
-    def store_highlighted_samples(selected_rows, table_data):
-        if not selected_rows or not table_data:
-            return []
-        return [table_data[i]['SampleId'] for i in selected_rows]
+    def store_highlighted_samples(train_selected, eval_selected, train_data, eval_data, tab):
+        if tab == 'train' and train_selected and train_data:
+            return [train_data[i]['SampleId'] for i in train_selected if i < len(train_data)]
+        elif tab == 'eval' and eval_selected and eval_data:
+            return [eval_data[i]['SampleId'] for i in eval_selected if i < len(eval_data)]
+        return []
+
 
     @app.callback(
         Output('experiment_checklist', 'options', allow_duplicate=True),
