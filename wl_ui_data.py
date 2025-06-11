@@ -37,7 +37,7 @@ initial_state = stub.ExperimentCommand(
     pb2.TrainerCommand(
         get_hyper_parameters=True,
         get_interactive_layers=False,
-        #get_data_records="train"
+        # get_data_records="train"
     )
 )
 ui_state.update_from_server_state(initial_state)
