@@ -108,7 +108,7 @@ val_dataset = val_dataset.dataset
 # import pdb; pdb.set_trace()
 
 
-device = th.device("cuda:0")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_exp():
     model = SmallCIFARNet()
