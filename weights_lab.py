@@ -9,7 +9,7 @@ from dash import dash_table
 from dash.dependencies import Input
 from dash.dependencies import Output
 from dash.dependencies import State
-
+import re
 import dash_daq as daq
 import dash_bootstrap_components as dbc
 import plotly.graph_objs as go
@@ -319,6 +319,8 @@ class UIState:
             self, hyper_parameters_descs: List[pb2.HyperParameterDesc]):
         hyper_parameters_descs.sort(key=lambda x: x.name)
 
+        if not hyper_parameters_descs:
+            return
         for hidx, hyper_parameter_desc in enumerate(hyper_parameters_descs):
             if hyper_parameter_desc.type == "number":
                 self.hyperparam.loc[hidx] = [
@@ -402,6 +404,8 @@ class UIState:
         """
             Update the neurons dataframe with the new neurons details.
         """
+        if not layer_representations:         
+            return 
         neuron_row_idx = 0
         neurons_df = pd.DataFrame(columns=_NEURONS_DF_COLUMNS)
         layers_df = pd.DataFrame(columns=_LAYER_DF_COLUMNS)
@@ -1551,14 +1555,19 @@ def main():
 
         while True:
             try:
-                for dataset in ["train", "eval"]:
-                    req = pb2.TrainerCommand(
-                        get_hyper_parameters=True,
-                        get_interactive_layers=False,
-                        get_data_records=dataset
-                    )
-                    state = stub.ExperimentCommand(req)
-                    ui_state.update_from_server_state(state)
+            
+                req = pb2.TrainerCommand(
+                    get_hyper_parameters=True,
+                    get_interactive_layers=True,
+                    get_data_records="train")
+                state = stub.ExperimentCommand(req)
+                ui_state.update_from_server_state(state)
+                req = pb2.TrainerCommand(
+                    get_hyper_parameters=True,
+                    get_interactive_layers=False,
+                    get_data_records="eval")
+                state = stub.ExperimentCommand(req)
+                ui_state.update_from_server_state(state)
             except Exception as e:
                 print("Error updating UI state:", e)
 
