@@ -2257,6 +2257,7 @@ def main():
                         'height': '128px',
                         'margin': '0.1vh',
                         'border': border,
+                        'transition': 'border 0.3s ease-in-out',
                         'objectFit': 'contain',
                         'imageRendering': 'auto'
                     }
@@ -2274,6 +2275,7 @@ def main():
             'rowGap': '0.1vh',
             'justifyItems': 'center',
             'alignItems': 'center',
+            'width': 'auto',
             'paddingLeft': '0.01vw'
         })
 
@@ -2372,6 +2374,7 @@ def main():
                         'height': '128px',
                         'margin': '0.1vh',
                         'border': border,
+                        'transition': 'border 0.3s ease-in-out',
                         'objectFit': 'contain',
                         'imageRendering': 'auto'
                     }
@@ -2386,6 +2389,7 @@ def main():
             'gridTemplateColumns': f'repeat({cols}, 1fr)',
             'columnGap': '0.1vw',
             'rowGap': '0.1vh',
+            'width': 'auto',
             'justifyItems': 'center',
             'alignItems': 'center',
             'paddingLeft': '0.01vw'
@@ -2551,13 +2555,19 @@ def main():
     @app.callback(
         Output('highlighted-sample-ids', 'data'),
         Input('train-data-table', 'selected_rows'),
+        Input('eval-data-table', 'selected_rows'),
         State('train-data-table', 'data'),
+        State('eval-data-table', 'data'),
+        State('data-tabs', 'value'),
         prevent_initial_call=True
     )
-    def store_highlighted_samples(selected_rows, table_data):
-        if not selected_rows or not table_data:
-            return []
-        return [table_data[i]['SampleId'] for i in selected_rows]
+    def store_highlighted_samples(train_selected, eval_selected, train_data, eval_data, tab):
+        if tab == 'train' and train_selected and train_data:
+            return [train_data[i]['SampleId'] for i in train_selected if i < len(train_data)]
+        elif tab == 'eval' and eval_selected and eval_data:
+            return [eval_data[i]['SampleId'] for i in eval_selected if i < len(eval_data)]
+        return []
+
 
     @app.callback(
         Output('experiment_checklist', 'options', allow_duplicate=True),
