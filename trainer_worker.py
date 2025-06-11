@@ -32,7 +32,7 @@ from segmentation_exp import get_exp
 # #from cad_models_exp import get_exp
 
 experiment = get_exp()
-# experiment.set_is_training(True)
+experiment.set_is_training(True)
 
 
 def training_thread_callback():
