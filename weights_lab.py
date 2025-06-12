@@ -2286,14 +2286,12 @@ def main():
 
         imgs = []
         try:
-            batch_response = stub.GetSamples(
-                pb2.BatchSampleRequest(
-                    sample_ids=sample_ids,
-                    origin='train',
-                    resize_width=128,
-                    resize_height=128
-                )
-            )
+            batch_response = stub.GetSamples(pb2.BatchSampleRequest(
+                sample_ids=sample_ids,
+                origin='train',
+                resize_width=256,
+                resize_height=256
+            ))
 
             for sample in batch_response.samples:
                 sid = sample.sample_id
