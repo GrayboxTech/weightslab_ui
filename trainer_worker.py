@@ -15,8 +15,7 @@ import experiment_service_pb2_grpc as pb2_grpc
 from collections import defaultdict
 from torchvision import transforms
 from scope_timer import ScopeTimer
-from fashion_mnist_exp import get_exp
-from fashion_mnist_exp import get_exp
+
 import torch
 from scope_timer import ScopeTimer
 # from fashion_mnist_exp import get_exp

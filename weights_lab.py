@@ -2243,7 +2243,9 @@ def main():
         try:
             batch_response = stub.GetSamples(pb2.BatchSampleRequest(
                 sample_ids=sample_ids,
-                origin='train'
+                origin='train',
+                resize_width=256,
+                resize_height=256
             ))
 
             for sample in batch_response.samples:
