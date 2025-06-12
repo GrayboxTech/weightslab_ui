@@ -12,7 +12,7 @@ from typing import List, Tuple, Iterable
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 from collections import defaultdict
-
+from torchvision import transforms
 from scope_timer import ScopeTimer
 # from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
@@ -390,25 +390,36 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
         response = pb2.BatchSampleResponse()
 
+        do_resize = request.HasField("resize_width") and request.HasField("resize_height")
+        resize_dims = (request.resize_width, request.resize_height) if do_resize else None
+
         for sid in request.sample_ids:
             try:
                 tensor, _, label = dataset._getitem_raw(sid)
-                transformed = tensor_to_bytes(tensor)
-                raw = load_raw_image(dataset, sid)
+                img = transforms.ToPILImage()(tensor)
+                if resize_dims:
+                    img = img.resize(resize_dims, Image.BILINEAR)
                 buf = io.BytesIO()
-                # raw.save(buf, format="PNG")
-                raw.save(buf, format='jpeg', quality=85)
+                img.save(buf, format='jpeg', quality=85)
+                transformed_bytes = buf.getvalue()
+                raw = load_raw_image(dataset, sid)
+                if resize_dims:
+                    raw = raw.resize(resize_dims, Image.BILINEAR)
+                raw_buf = io.BytesIO()
+                raw.save(raw_buf, format='jpeg', quality=85)
+
                 sample_response = pb2.SampleRequestResponse(
                     sample_id=sid,
                     origin=request.origin,
                     label=label,
-                    data=transformed,
-                    raw_data=buf.getvalue()
+                    data=transformed_bytes,
+                    raw_data=raw_buf.getvalue()
                 )
                 response.samples.append(sample_response)
             except Exception as e:
                 print(f"[Error] GetSamples({sid}) failed: {e}")
         return response
+
 
 
     def ManipulateWeights(self, request, context):
