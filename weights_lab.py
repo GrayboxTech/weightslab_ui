@@ -240,6 +240,10 @@ class UIState:
             name=exp_name,
             line=dict(color=self.exp_name_2_color[exp_name]),
         )
+        print(f"UIState.get_plots_for_exp_name_metric_name: "
+              f"exp_name={exp_name}, metric_name={metric_name}, "
+              f"len(relevant_df)={len(relevant_df)}")
+
         self.exp_name_metric_name_2_plot[key] = plot
         annotation_plots = self._get_annot_plots(exp_name, metric_name)
         self.exp_name_metric_name_2_anot[key] = annotation_plots
@@ -286,6 +290,9 @@ class UIState:
                     "size": 10,
                 }
             )
+            print(f"UIState._get_annot_plots: exp_name={exp_name}, "
+                  f"met_name={met_name}, anot_name={anot_name}, "
+                  f"len(relevant_df)={len(relevant_df)}")
             plots.append(anot)
         return plots
 
@@ -431,7 +438,6 @@ class UIState:
 
     def update_metrics_from_server(
             self, status: pb2.TrainingStatusEx):
-        # print(f"UIState.update_metrics_from_server: {status}")
         self.exp_names.add(status.experiment_name)
         self.exp_name_2_need_redraw[status.experiment_name] = True
 
@@ -483,9 +489,9 @@ class UIState:
                 self.annotation.to_csv(self.annotation_path, index=False)
             self.ant_names.add(status.annotat_status.name)
 
-        print("UI.update_metrics_from_server: ", len(self.metrics_df), len(self.annotation), end="\r")
-
-    # updated function to take lists instead of maps
+        print(
+            "UI.update_metrics_from_server: ",
+            len(self.metrics_df), len(self.annotation), end="\r")
 
     def update_samples_from_server(self, sample_statistics: pb2.SampleStatistics):
         try:
@@ -1196,15 +1202,6 @@ def get_weights_div(ui_state: UIState):
 
 
 def get_plots_div():
-    # experiment_smoothness = html.Div(
-    #     id="experiment_smoothness",
-    #     children="Smoothness: 0.6",
-    # )
-    # experiment_smooth_sld = dcc.Slider(
-    #     0, 1.0, 0.01,
-    #     value=0.6,
-    #     id='plot-smoothness-slider',
-    # )
     experiment_checkboxes = dcc.Checklist(
         id='experiment_checklist',
         options=[],
@@ -1220,19 +1217,13 @@ def get_plots_div():
 
     experiment_management = dbc.Col(
         id="experiment_management",
-        children=[
-            # experiment_smoothness,
-            # experiment_smooth_sld,
-            experiment_checkboxes,
-        ],
+        children=[experiment_checkboxes,],
         width=1,
     )
 
     experiment_plots_div = dbc.Col(
         id="experiment_plots_div",
-        children=[
-            #dcc.Graph(id='experiment-plot'),
-        ],
+        children=[],
         width=11,
     )
 
@@ -1374,7 +1365,6 @@ def get_data_tab(ui_state: UIState):
         html.Div(eval_grid_dropdown, style={'marginLeft': '1vw'})
     ], style={'display': 'flex', 'alignItems': 'center', 'gap': '1vw'})
 
-
     train_query_div = dbc.Row([
     dbc.Col(
         dbc.Input(
@@ -1406,7 +1396,6 @@ def get_data_tab(ui_state: UIState):
         ),
     ),
 ])
-
 
     eval_query_div = dbc.Row([
         dbc.Col(
@@ -1518,8 +1507,8 @@ def get_ui_app_layout(ui_state: UIState) -> html.Div:
 
     layout_children = [
         dcc.Interval(id='weights-render-freq', interval=1*1000, n_intervals=0),
-        dcc.Interval(id='datatbl-render-freq', interval=10*1000, n_intervals=0),
-        dcc.Interval(id='graphss-render-freq', interval=10*1000, n_intervals=0),
+        dcc.Interval(id='datatbl-render-freq', interval=5*1000, n_intervals=0),
+        dcc.Interval(id='graphss-render-freq', interval=30*1000, n_intervals=0),
         html.H1("WeightsLab", style={'textAlign': 'center'}),
         hyper_parameters_div,
     ]
@@ -1533,10 +1522,6 @@ def get_ui_app_layout(ui_state: UIState) -> html.Div:
     ])
 
     return html.Div(children=layout_children)
-
-
-
-
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -1668,47 +1653,217 @@ def main():
         stub.ExperimentCommand(request)
         return button_children
 
-    # @app.callback(
-    #     Output('layer-weights', 'children'),
-    #     Input('weights-render-freq', 'n_intervals'),
-    #     Input('neuron_stats-checkboxes', 'value'),
-    #     # Input('refresh-weights-div-store', 'data'),
-    #     State('layer-weights', 'children'),
-    #     prevent_initial_call=True
-    # )
-    # def update_weights_div(_, checklist_values, children):
-    #     print(f"[UI] WeightsLab.update_weights_div {checklist_values},")
-    #     nonlocal ui_state
-    #     nonlocal stub
+    @app.callback(
+        Output('experiment_checklist', 'options', allow_duplicate=True),
+        Output('experiment_checklist', 'value', allow_duplicate=True),
+        Input('graphss-render-freq', 'n_intervals'),
+    )
+    def update_experiments_checklist(n_intervals):
+        nonlocal ui_state
 
-    #     ctx = dash.callback_context
-    #     if not ctx.triggered:
-    #         trigger = 'No trigger'
-    #     else:
-    #         trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+        experiment_names = list(ui_state.exp_names)
+        options = [
+            {'label': experiment_name, 'value': experiment_name}
+            for experiment_name in experiment_names]
+        return options, experiment_names
 
-    #     print("[UI] WeightsLab.update_weights_div.trigger:", trigger)
-    #     if 'weights' in trigger:
-    #         print("[UI] WeightsLab.update_weights_div.refreshing.")
-    #         if children:
-    #             return children
+    @app.callback(
+        Output("experiment_plots_div", "children"),
+        Input("graphss-render-freq", "n_intervals"),
+        State("experiment_plots_div", "children")
+    )
+    def add_graphs_to_div(_, existing_children):
+        print(f"UI.add_graphs_to_div")
+        nonlocal ui_state
 
-    #         if not checklist_values:
-    #             return []
+        graph_names = sorted(ui_state.met_names)
 
-    #     if 'neuron_stats-checkboxes' in trigger:
-    #         print("[UI] WeightsLab.update_weights_div.checklist_values.")
+        if len(graph_names) == len(existing_children):
+            return existing_children
+        if len(graph_names) == 0:
+            return no_update
 
-    #         children = []
-    #         for _, layer_row in ui_state.layers_df.iterrows():
-    #             layer_neurons_df = ui_state.neurons_df.loc[layer_row.layer_id]
-    #             layer_neurons_df = layer_neurons_df.reset_index()
-    #             layer_neurons_df['layer_id'] = layer_row['layer_id']
+        graph_divs = []
+        for graph_name in graph_names:
+            graph_divs.append(
+                dcc.Graph(
+                    id={"type": "graph", "index": graph_name},
+                    config={"displayModeBar": False},
+                )
+            )
+        return graph_divs
 
-    #             children.append(get_layer_div(
-    #                 layer_row, layer_neurons_df, ui_state, checklist_values))
-    #         return children
-    #     return no_update
+    @app.callback(
+        Output({'type': "graph", "index": MATCH}, "figure", allow_duplicate=True),
+        Input("graphss-render-freq", "n_intervals"),
+        State({'type': "graph", "index": MATCH}, "id"),
+        State('experiment_checklist', "value"),
+        prevent_initial_call=True,
+    )
+    def update_graph(_, graph_id, checklist):
+        print("update_graph", graph_id, checklist)
+        nonlocal ui_state
+
+        metric_name = graph_id["index"]
+        data = []
+
+        for experiment_name in checklist:
+            data.extend(ui_state.get_plots_for_exp_name_metric_name(
+                metric_name, experiment_name)
+            )
+        if ui_state.plot_name_2_curr_head_point[metric_name] is not None:
+            curr_point = ui_state.plot_name_2_curr_head_point[metric_name]
+            data.append(
+                go.Scattergl(
+                    x=[curr_point.x],
+                    y=[curr_point.y],
+                    mode='markers',
+                    name="Current Model",
+                    marker_symbol="star-diamond-open-dot",
+                    marker=dict(color='red', size=16)
+                )
+            )
+        select_graph = go.Scattergl(
+            x=[None],
+            y=[None],
+            mode='markers',
+            name="",
+            marker_symbol="diamond",
+            marker=dict(color='cyan', size=16, opacity=0.8)
+        )
+        figure = {
+            'data': data + [select_graph],
+            'layout': go.Layout(
+                title=metric_name,
+                xaxis={'title': 'Seen Samples'},
+                yaxis={'title': "Value"},
+            )
+        }
+        return figure
+
+    @app.callback(
+        Output({'type': "graph", "index": MATCH}, "figure", allow_duplicate=True),
+        [
+            Input({'type': "graph", "index": MATCH}, 'hoverData'),
+            Input({'type': "graph", "index": MATCH}, 'clickData'),
+        ],
+        State({'type': "graph", "index": MATCH}, "figure"),
+    )
+    def update_selection_of_checkpoint(hoverData, clickData, figure):
+        nonlocal stub
+        nonlocal ui_state
+        # print("update_selection_of_checkpoint", hoverData, clickData, figure)
+
+        if hoverData is None or 'points' not in hoverData:
+            return no_update
+
+        cursor_x = hoverData['points'][0]['x']
+        cursor_y = hoverData['points'][0]['y']
+
+        x_min, y_min, t_min, i_min, min_dist = None, None, None, None, 1e10
+
+        if 'data' not in figure:
+            return no_update
+
+        for t_idx, trace_data in enumerate(figure['data']):
+            if "ckpt" not in trace_data['name']:
+                continue
+            x_data = np.array(trace_data['x'])
+            y_data = np.array(trace_data['y'])
+
+            for i, val in enumerate(x_data):
+                x_data[i] = 0 if val is None else val
+
+            for i, val in enumerate(y_data):
+                y_data[i] = 0 if val is None else val
+
+            if len(y_data) < len(x_data):
+                x_data = x_data[:-1]
+            elif len(x_data) < len(y_data):
+                y_data = y_data[:-1]
+
+            if x_data is None or y_data is None or x_data.size == 0 or \
+                    y_data.size == 0 or cursor_x is None or cursor_y is None:
+                continue
+
+            # replace None in x_data and y_data with 0
+            x_data = np.nan_to_num(x_data)
+            try:
+                distances = np.sqrt(
+                    (x_data - cursor_x) ** 2 + (y_data - cursor_y) ** 2)
+                min_index = np.argmin(distances)  # Index of the closest point
+                if distances[min_index] < min_dist:
+                    x_min, y_min, t_min, i_min, min_dist = (
+                        x_data[min_index], y_data[min_index], t_idx, min_index,
+                        distances[min_index])
+            except Exception as e:
+                print(f"Error in update_selection_of_checkpoint: {e}")
+                continue
+
+        checkpoint_id_to_load = None
+        if t_min is not None and i_min is not None:
+            figure['data'][-1]['x'] = [x_min]
+            figure['data'][-1]['y'] = [y_min]
+
+            if i_min < len(figure['data'][t_min]["customdata"]):
+                checkpoint_id_to_load = \
+                    figure['data'][t_min]["customdata"][i_min]
+
+        if clickData:
+            load_checkpoint_op = pb2.LoadCheckpointOperation(
+                checkpoint_id=checkpoint_id_to_load)
+            load_checkpoint_request = pb2.TrainerCommand(
+                load_checkpoint_operation=load_checkpoint_op)
+            ckpt_load_result = stub.ExperimentCommand(
+                load_checkpoint_request)
+
+            print(f"Checkpoint load result: {ckpt_load_result}")
+
+            if checkpoint_id_to_load is not None:
+                print("Figure data: ", figure['data'][t_min])
+        return figure
+
+    @app.callback(
+        Output('layer-weights', 'children'),
+        Input('weights-render-freq', 'n_intervals'),
+        Input('neuron_stats-checkboxes', 'value'),
+        # Input('refresh-weights-div-store', 'data'),
+        State('layer-weights', 'children'),
+        prevent_initial_call=True
+    )
+    def update_weights_div(_, checklist_values, children):
+        print(f"[UI] WeightsLab.update_weights_div {checklist_values},")
+        nonlocal ui_state
+        nonlocal stub
+
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            trigger = 'No trigger'
+        else:
+            trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+
+        print("[UI] WeightsLab.update_weights_div.trigger:", trigger)
+        if 'weights' in trigger:
+            print("[UI] WeightsLab.update_weights_div.refreshing.")
+            if children:
+                return children
+
+            if not checklist_values:
+                return []
+
+        if 'neuron_stats-checkboxes' in trigger:
+            print("[UI] WeightsLab.update_weights_div.checklist_values.")
+
+            children = []
+            for _, layer_row in ui_state.layers_df.iterrows():
+                layer_neurons_df = ui_state.neurons_df.loc[layer_row.layer_id]
+                layer_neurons_df = layer_neurons_df.reset_index()
+                layer_neurons_df['layer_id'] = layer_row['layer_id']
+
+                children.append(get_layer_div(
+                    layer_row, layer_neurons_df, ui_state, checklist_values))
+            return children
+        return no_update
 
     @app.callback(
         Output({'type': 'layer-data-table', 'layer_id': MATCH}, 'columns'),
@@ -1727,7 +1882,6 @@ def main():
             layer_div_style
     ):
         # print(f"[UI] WeightsLab.update_layer_data_table.", neuron_dt_div_id)
-
         layer_id = neuron_dt_div_id['layer_id']
         if layer_id not in ui_state.get_neurons_df().index.get_level_values(0):
             # print('layer_id not updated:', layer_id)
@@ -1886,7 +2040,6 @@ def main():
         # row = data[selected_row_index]
         # print("Selected row: ", row)
 
-
     @app.callback(
         Input('run-neuron-data-query', 'n_clicks'),
         State('neuron-query-input', 'value'),
@@ -1948,51 +2101,39 @@ def main():
             response = stub.ManipulateWeights(request)
             print(f"Weight operation response: {response}")
 
-    # @app.callback(
-    #     Output('train-data-table', 'data'),
-    #     Input('datatbl-render-freq', 'n_intervals'),
-    #     State('table-refresh-checkbox', 'value'),
-    # )
-    # def update_train_data_table(_, refresh_checkbox):
-    #     print("[UI] WeightsLab.update_train_data_table")
-    #     nonlocal ui_state
-    #     if "refresh_regularly" not in refresh_checkbox:
-    #         return no_update
-    #     return ui_state.samples_df.to_dict('records')
+    @app.callback(
+        Input('run-train-data-query', 'n_clicks'),
+        State('train-data-query-input', 'value'),
+        State('data-query-input-weight', 'value'),
+    )
+    def run_query_on_dataset(_, query, weight):
+        nonlocal ui_state
+        if weight is None:
+            weight = 1.0
 
-    # @app.callback(
-    #     Input('run-train-data-query', 'n_clicks'),
-    #     State('train-data-query-input', 'value'),
-    #     State('data-query-input-weight', 'value'),
-    # )
-    # def run_query_on_dataset(_, query, weight):
-    #     nonlocal ui_state
-    #     if weight is None:
-    #         weight = 1.0
+        # dataframe = pd.DataFrame(
+        #     sample_statistics_to_data_records(
+        #     data_representation_response.sample_statistics))
+        # query_dataframe = dataframe.query(query)
+        query_dataframe = ui_state.samples_df.query(query)
 
-    #     # dataframe = pd.DataFrame(
-    #     #     sample_statistics_to_data_records(
-    #     #     data_representation_response.sample_statistics))
-    #     # query_dataframe = dataframe.query(query)
-    #     query_dataframe = ui_state.samples_df.query(query)
+        if weight <= 1.0:
+            query_dataframe = query_dataframe.sample(frac=weight)
+        elif type(weight) is int:
+            query_dataframe = query_dataframe.sample(n=weight)
 
-    #     if weight <= 1.0:
-    #         query_dataframe = query_dataframe.sample(frac=weight)
-    #     elif type(weight) is int:
-    #         query_dataframe = query_dataframe.sample(n=weight)
+        discarded_samples = query_dataframe['SampleId'].to_list()
+        deny_samples_operation = pb2.DenySamplesOperation()
+        deny_samples_operation.sample_ids.extend(discarded_samples)
+        deny_samples_request = pb2.TrainerCommand(
+            deny_samples_operation=deny_samples_operation)
+        deny_samples_response = stub.ExperimentCommand(deny_samples_request)
 
-    #     discarded_samples = query_dataframe['SampleId'].to_list()
-    #     deny_samples_operation = pb2.DenySamplesOperation()
-    #     deny_samples_operation.sample_ids.extend(discarded_samples)
-    #     deny_samples_request = pb2.TrainerCommand(
-    #         deny_samples_operation=deny_samples_operation)
-    #     deny_samples_response = stub.ExperimentCommand(deny_samples_request)
+        print(
+            f"Query: {query}, Weight: {weight}, "
+            f"Response: {deny_samples_response}")
 
-    #     print(
-    #         f"Query: {query}, Weight: {weight}, "
-    #         f"Response: {deny_samples_response}")
-
-    #     return no_update
+        return no_update
 
     # @app.callback(
     #     Output('train-data-div', 'style', allow_duplicate=True),
@@ -2014,36 +2155,6 @@ def main():
     #     })
 
     #     return style
-
-    # @app.callback(
-    #     Output('data-panel-col1', 'children', allow_duplicate=True),
-    #     Input('train-data-table', 'selected_rows'),
-    #     State('train-data-table', 'data'),
-    #     State('sample-inspect-checkboxes', 'value'),
-    # )
-    # def render_data_sample(selected_rows, data, inspect_checkboxes):
-    #     if selected_rows is None or len(selected_rows) == 0 or \
-    #             len(inspect_checkboxes) == 0:
-    #         return []
-
-    #     # Get the selected row's data
-    #     selected_row_index = selected_rows[-1]
-    #     row = data[selected_row_index]
-    #     selected_sample_id = row["SampleId"]
-    #     request = pb2.SampleRequest(
-    #         sample_id=selected_sample_id, origin="train")
-    #     response = stub.GetSample(request)
-
-    #     image_base64 = base64.b64encode(response.data).decode('utf-8')
-
-    #     return html.Img(
-    #         src=f'data:image/png;base64,{image_base64}',
-    #         style={
-    #             'width': '18vw',
-    #             'height': '18vh',
-    #             'marginTop': '10vh',
-    #         }
-    #     )
 
     # @app.callback(
     #     Output('train-data-table', 'data', allow_duplicate=True),
@@ -2075,9 +2186,9 @@ def main():
     #     if "discard_by_flag_flip" in table_checkboxes:
     #         return previous_data
     #     return current_data
-    
+
     @app.callback(
-        Output('train-data-table', 'data'),
+        Output('train-data-table', 'data', allow_duplicate=True),
         Input('datatbl-render-freq', 'n_intervals'),
         State('table-refresh-checkbox', 'value'),
         State('train-sort-store', 'data'),
@@ -2095,7 +2206,7 @@ def main():
         return df.to_dict('records')
 
     @app.callback(
-        Output('eval-data-table', 'data'),
+        Output('eval-data-table', 'data', allow_duplicate=True),
         Input('datatbl-render-freq', 'n_intervals'),
         State('table-refresh-checkbox', 'value'),
         State('eval-sort-store', 'data'),
@@ -2127,7 +2238,7 @@ def main():
         return grid_count
 
     @app.callback(
-        Output('train-sample-panel', 'children', allow_duplicate= True),
+        Output('train-sample-panel', 'children', allow_duplicate=True),
         Input('train-data-table', 'derived_viewport_data'),
         Input('train-data-table', 'selected_rows'),
         Input('sample-inspect-checkboxes', 'value'),
@@ -2136,6 +2247,7 @@ def main():
         prevent_initial_call=True
     )
     def render_visible_train_samples(viewport_data, selected_rows, inspect_flags, active_tab, selected_sample_ids_from_store):
+        print(f"[UI] WeightsLab.render_visible_train_samples {active_tab}, {inspect_flags}")
         if active_tab != 'train' or 'inspect_sample_on_click' not in inspect_flags:
             return no_update
         if 'inspect_sample_on_click' not in inspect_flags:
@@ -2147,6 +2259,7 @@ def main():
         current_ids = set(ui_state.samples_df['SampleId'].values)
         sample_ids = [row['SampleId'] for row in viewport_data if row['SampleId'] in current_ids]
 
+        print(f"[UI] WeightsLab.render_visible_train_samples sample_ids: {sample_ids}")
         selected_sample_ids = set(selected_sample_ids_from_store)
         if selected_rows:
             df_records = ui_state.samples_df.reset_index(drop=True).to_dict('records')
@@ -2156,12 +2269,14 @@ def main():
 
         imgs = []
         try:
-            batch_response = stub.GetSamples(pb2.BatchSampleRequest(
-                sample_ids=sample_ids,
-                origin='train',
-                resize_width=256,
-                resize_height=256
-            ))
+            batch_response = stub.GetSamples(
+                pb2.BatchSampleRequest(
+                    sample_ids=sample_ids,
+                    origin='train',
+                    resize_width=128,
+                    resize_height=128
+                )
+            )
 
             for sample in batch_response.samples:
                 sid = sample.sample_id
@@ -2196,7 +2311,6 @@ def main():
             'paddingLeft': '0.01vw'
         })
 
-
     @app.callback(
         Input('run-train-data-query', 'n_clicks'),
         State('train-data-query-input', 'value'),
@@ -2207,7 +2321,6 @@ def main():
     def run_query_on_dataset(_, query, weight, toggle_values):
         if 'sortby' in query.lower():
             return no_update
-        
         if weight is None:
             weight = 1.0
         un_discard = 'undiscard' in toggle_values
@@ -2312,7 +2425,6 @@ def main():
             'paddingLeft': '0.01vw'
         })
 
-
     @app.callback(
         Input('run-eval-data-query', 'n_clicks'),
         State('eval-data-query-input', 'value'),
@@ -2362,7 +2474,6 @@ def main():
 
         return no_update
 
-
     @app.callback(
         Output('train-data-table', 'data', allow_duplicate=True),
         Input('train-data-table', 'data'),
@@ -2388,7 +2499,6 @@ def main():
             return prev_data
         return current_data
 
-
     @app.callback(
         Output('eval-data-table', 'data', allow_duplicate=True),
         Input('eval-data-table', 'data'),
@@ -2413,7 +2523,6 @@ def main():
                     r['Discarded'] = True
             return prev_data
         return current_data
-
 
     @app.callback(
         Output('train-sort-store', 'data'),
@@ -2485,184 +2594,7 @@ def main():
             return [eval_data[i]['SampleId'] for i in eval_selected if i < len(eval_data)]
         return []
 
-
-    @app.callback(
-        Output('experiment_checklist', 'options', allow_duplicate=True),
-        Output('experiment_checklist', 'value', allow_duplicate=True),
-        Input('graphss-render-freq', 'n_intervals'),
-    )
-    def update_experiments_checklist(n_intervals):
-        nonlocal ui_state
-
-        experiment_names = list(ui_state.exp_names)
-        options = [
-            {'label': experiment_name, 'value': experiment_name}
-            for experiment_name in experiment_names]
-        return options, experiment_names
-
-    @app.callback(
-        Output("experiment_plots_div", "children"),
-        Input("graphss-render-freq", "n_intervals"),
-        State("experiment_plots_div", "children")
-    )
-    def add_graphs_to_div(_, existing_children):
-        print(f"UI.add_graphs_to_div")
-        nonlocal ui_state
-
-        graph_names = sorted(ui_state.met_names)
-
-        if len(graph_names) == len(existing_children):
-            return existing_children
-        if len(graph_names) == 0:
-            return no_update
-
-        graph_divs = []
-        for graph_name in graph_names:
-            graph_divs.append(
-                dcc.Graph(
-                    id={"type": "graph", "index": graph_name},
-                    config={"displayModeBar": False},
-                )
-            )
-        return graph_divs
-
-    @app.callback(
-        Output({'type': "graph", "index": MATCH}, "figure", allow_duplicate=True),
-        Input("graphss-render-freq", "n_intervals"),
-        State({'type': "graph", "index": MATCH}, "id"),
-        State('experiment_checklist', "value"),
-        # State("plot-smoothness-slider", "value"),
-        prevent_initial_call=True,
-    )
-    def update_graph(_, graph_id, checklist):
-        # print("update_graph", graph_id, checklist)
-        nonlocal ui_state
-
-        metric_name = graph_id["index"]
-        data = []
-
-        for experiment_name in checklist:
-            data.extend(ui_state.get_plots_for_exp_name_metric_name(
-                metric_name, experiment_name)
-            )
-        if ui_state.plot_name_2_curr_head_point[metric_name] is not None:
-            curr_point = ui_state.plot_name_2_curr_head_point[metric_name]
-            data.append(
-                go.Scattergl(
-                    x=[curr_point.x],
-                    y=[curr_point.y],
-                    mode='markers',
-                    name="Current Model",
-                    marker_symbol="star-diamond-open-dot",
-                    marker=dict(color='red', size=16)
-                )
-            )
-
-        select_graph = go.Scattergl(
-            x=[None],
-            y=[None],
-            mode='markers',
-            name="",
-            marker_symbol="diamond",
-            marker=dict(color='cyan', size=16, opacity=0.8)
-        )
-
-        figure = {
-            'data': data + [select_graph],
-            'layout': go.Layout(
-                title=metric_name,
-                xaxis={'title': 'Seen Samples'},
-                yaxis={'title': "Value"},
-            )
-        }
-        return figure
-
-    @app.callback(
-        Output({'type': "graph", "index": MATCH}, "figure", allow_duplicate=True),
-        [
-            Input({'type': "graph", "index": MATCH}, 'hoverData'),
-            Input({'type': "graph", "index": MATCH}, 'clickData'),
-        ],
-        State({'type': "graph", "index": MATCH}, "figure"),
-    )
-    def update_selection_of_checkpoint(hoverData, clickData, figure):
-        nonlocal stub
-        nonlocal ui_state
-        # print("update_selection_of_checkpoint", hoverData, clickData, figure)
-
-        if hoverData is None or 'points' not in hoverData:
-            return no_update
-
-        cursor_x = hoverData['points'][0]['x']
-        cursor_y = hoverData['points'][0]['y']
-
-        x_min, y_min, t_min, i_min, min_dist = None, None, None, None, 1e10
-
-        if 'data' not in figure:
-            return no_update
-
-        for t_idx, trace_data in enumerate(figure['data']):
-            if "ckpt" not in trace_data['name']:
-                continue
-            x_data = np.array(trace_data['x'])
-            y_data = np.array(trace_data['y'])
-
-            for i, val in enumerate(x_data):
-                x_data[i] = 0 if val is None else val
-
-            for i, val in enumerate(y_data):
-                y_data[i] = 0 if val is None else val
-
-            if len(y_data) < len(x_data):
-                x_data = x_data[:-1]
-            elif len(x_data) < len(y_data):
-                y_data = y_data[:-1]
-
-            if x_data is None or y_data is None or x_data.size == 0 or \
-                    y_data.size == 0 or cursor_x is None or cursor_y is None:
-                continue
-
-            # replace None in x_data and y_data with 0
-            x_data = np.nan_to_num(x_data)
-            try:
-                distances = np.sqrt(
-                    (x_data - cursor_x) ** 2 + (y_data - cursor_y) ** 2)
-                min_index = np.argmin(distances)  # Index of the closest point
-                if distances[min_index] < min_dist:
-                    x_min, y_min, t_min, i_min, min_dist = (
-                        x_data[min_index], y_data[min_index], t_idx, min_index,
-                        distances[min_index])
-            except Exception as e:
-                print(f"Error in update_selection_of_checkpoint: {e}")
-                continue
-
-        checkpoint_id_to_load = None
-        if t_min is not None and i_min is not None:
-            figure['data'][-1]['x'] = [x_min]
-            figure['data'][-1]['y'] = [y_min]
-
-            if i_min < len(figure['data'][t_min]["customdata"]):
-                checkpoint_id_to_load = \
-                    figure['data'][t_min]["customdata"][i_min]
-
-        if clickData:
-            load_checkpoint_op = pb2.LoadCheckpointOperation(
-                checkpoint_id=checkpoint_id_to_load)
-            load_checkpoint_request = pb2.TrainerCommand(
-                load_checkpoint_operation=load_checkpoint_op)
-            ckpt_load_result = stub.ExperimentCommand(
-                load_checkpoint_request)
-
-            print(f"Checkpoint load result: {ckpt_load_result}")
-
-            if checkpoint_id_to_load is not None:
-                print("Figure data: ", figure['data'][t_min])
-
-        return figure
-
-
     app.run(debug=False, port=8050)
-
 
 
 if __name__ == '__main__':
