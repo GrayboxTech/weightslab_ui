@@ -32,15 +32,14 @@ from segmentation_exp import get_exp
 # #from cad_models_exp import get_exp
 
 experiment = get_exp()
-experiment.set_is_training(True)
+# experiment.set_is_training(True)
 
 
 def training_thread_callback():
     while True:
-        # print("Training thread callback ", str(experiment), end="\r")
+        print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
-            # print(f"[TRAINING] Remaining steps: {experiment.training_steps_to_do}")
 
 
 training_thread = Thread(target=training_thread_callback)
