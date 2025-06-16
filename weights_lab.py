@@ -2033,51 +2033,39 @@ def main():
             response = stub.ManipulateWeights(request)
             print(f"Weight operation response: {response}")
 
-    # @app.callback(
-    #     Output('train-data-table', 'data'),
-    #     Input('datatbl-render-freq', 'n_intervals'),
-    #     State('table-refresh-checkbox', 'value'),
-    # )
-    # def update_train_data_table(_, refresh_checkbox):
-    #     print("[UI] WeightsLab.update_train_data_table")
-    #     nonlocal ui_state
-    #     if "refresh_regularly" not in refresh_checkbox:
-    #         return no_update
-    #     return ui_state.samples_df.to_dict('records')
+    @app.callback(
+        Input('run-train-data-query', 'n_clicks'),
+        State('train-data-query-input', 'value'),
+        State('data-query-input-weight', 'value'),
+    )
+    def run_query_on_dataset(_, query, weight):
+        nonlocal ui_state
+        if weight is None:
+            weight = 1.0
 
-    # @app.callback(
-    #     Input('run-train-data-query', 'n_clicks'),
-    #     State('train-data-query-input', 'value'),
-    #     State('data-query-input-weight', 'value'),
-    # )
-    # def run_query_on_dataset(_, query, weight):
-    #     nonlocal ui_state
-    #     if weight is None:
-    #         weight = 1.0
+        # dataframe = pd.DataFrame(
+        #     sample_statistics_to_data_records(
+        #     data_representation_response.sample_statistics))
+        # query_dataframe = dataframe.query(query)
+        query_dataframe = ui_state.samples_df.query(query)
 
-    #     # dataframe = pd.DataFrame(
-    #     #     sample_statistics_to_data_records(
-    #     #     data_representation_response.sample_statistics))
-    #     # query_dataframe = dataframe.query(query)
-    #     query_dataframe = ui_state.samples_df.query(query)
+        if weight <= 1.0:
+            query_dataframe = query_dataframe.sample(frac=weight)
+        elif type(weight) is int:
+            query_dataframe = query_dataframe.sample(n=weight)
 
-    #     if weight <= 1.0:
-    #         query_dataframe = query_dataframe.sample(frac=weight)
-    #     elif type(weight) is int:
-    #         query_dataframe = query_dataframe.sample(n=weight)
+        discarded_samples = query_dataframe['SampleId'].to_list()
+        deny_samples_operation = pb2.DenySamplesOperation()
+        deny_samples_operation.sample_ids.extend(discarded_samples)
+        deny_samples_request = pb2.TrainerCommand(
+            deny_samples_operation=deny_samples_operation)
+        deny_samples_response = stub.ExperimentCommand(deny_samples_request)
 
-    #     discarded_samples = query_dataframe['SampleId'].to_list()
-    #     deny_samples_operation = pb2.DenySamplesOperation()
-    #     deny_samples_operation.sample_ids.extend(discarded_samples)
-    #     deny_samples_request = pb2.TrainerCommand(
-    #         deny_samples_operation=deny_samples_operation)
-    #     deny_samples_response = stub.ExperimentCommand(deny_samples_request)
+        print(
+            f"Query: {query}, Weight: {weight}, "
+            f"Response: {deny_samples_response}")
 
-    #     print(
-    #         f"Query: {query}, Weight: {weight}, "
-    #         f"Response: {deny_samples_response}")
-
-    #     return no_update
+        return no_update
 
     # @app.callback(
     #     Output('train-data-div', 'style', allow_duplicate=True),
@@ -2099,36 +2087,6 @@ def main():
     #     })
 
     #     return style
-
-    # @app.callback(
-    #     Output('data-panel-col1', 'children', allow_duplicate=True),
-    #     Input('train-data-table', 'selected_rows'),
-    #     State('train-data-table', 'data'),
-    #     State('sample-inspect-checkboxes', 'value'),
-    # )
-    # def render_data_sample(selected_rows, data, inspect_checkboxes):
-    #     if selected_rows is None or len(selected_rows) == 0 or \
-    #             len(inspect_checkboxes) == 0:
-    #         return []
-
-    #     # Get the selected row's data
-    #     selected_row_index = selected_rows[-1]
-    #     row = data[selected_row_index]
-    #     selected_sample_id = row["SampleId"]
-    #     request = pb2.SampleRequest(
-    #         sample_id=selected_sample_id, origin="train")
-    #     response = stub.GetSample(request)
-
-    #     image_base64 = base64.b64encode(response.data).decode('utf-8')
-
-    #     return html.Img(
-    #         src=f'data:image/png;base64,{image_base64}',
-    #         style={
-    #             'width': '18vw',
-    #             'height': '18vh',
-    #             'marginTop': '10vh',
-    #         }
-    #     )
 
     # @app.callback(
     #     Output('train-data-table', 'data', allow_duplicate=True),
@@ -2160,9 +2118,9 @@ def main():
     #     if "discard_by_flag_flip" in table_checkboxes:
     #         return previous_data
     #     return current_data
-    
+
     @app.callback(
-        Output('train-data-table', 'data'),
+        Output('train-data-table', 'data', allow_duplicate=True),
         Input('datatbl-render-freq', 'n_intervals'),
         State('table-refresh-checkbox', 'value'),
         State('train-sort-store', 'data'),
@@ -2180,7 +2138,7 @@ def main():
         return df.to_dict('records')
 
     @app.callback(
-        Output('eval-data-table', 'data'),
+        Output('eval-data-table', 'data', allow_duplicate=True),
         Input('datatbl-render-freq', 'n_intervals'),
         State('table-refresh-checkbox', 'value'),
         State('eval-sort-store', 'data'),
@@ -2212,7 +2170,7 @@ def main():
         return grid_count
 
     @app.callback(
-        Output('train-sample-panel', 'children', allow_duplicate= True),
+        Output('train-sample-panel', 'children', allow_duplicate=True),
         Input('train-data-table', 'derived_viewport_data'),
         Input('train-data-table', 'selected_rows'),
         Input('sample-inspect-checkboxes', 'value'),
@@ -2221,6 +2179,7 @@ def main():
         prevent_initial_call=True
     )
     def render_visible_train_samples(viewport_data, selected_rows, inspect_flags, active_tab, selected_sample_ids_from_store):
+        print(f"[UI] WeightsLab.render_visible_train_samples {active_tab}, {inspect_flags}")
         if active_tab != 'train' or 'inspect_sample_on_click' not in inspect_flags:
             return no_update
         if 'inspect_sample_on_click' not in inspect_flags:
@@ -2232,6 +2191,7 @@ def main():
         current_ids = set(ui_state.samples_df['SampleId'].values)
         sample_ids = [row['SampleId'] for row in viewport_data if row['SampleId'] in current_ids]
 
+        print(f"[UI] WeightsLab.render_visible_train_samples sample_ids: {sample_ids}")
         selected_sample_ids = set(selected_sample_ids_from_store)
         if selected_rows:
             df_records = ui_state.samples_df.reset_index(drop=True).to_dict('records')
@@ -2241,12 +2201,14 @@ def main():
 
         imgs = []
         try:
-            batch_response = stub.GetSamples(pb2.BatchSampleRequest(
-                sample_ids=sample_ids,
-                origin='train',
-                resize_width=256,
-                resize_height=256
-            ))
+            batch_response = stub.GetSamples(
+                pb2.BatchSampleRequest(
+                    sample_ids=sample_ids,
+                    origin='train',
+                    resize_width=128,
+                    resize_height=128
+                )
+            )
 
             for sample in batch_response.samples:
                 sid = sample.sample_id
@@ -2281,7 +2243,6 @@ def main():
             'paddingLeft': '0.01vw'
         })
 
-
     @app.callback(
         Input('run-train-data-query', 'n_clicks'),
         State('train-data-query-input', 'value'),
@@ -2292,7 +2253,6 @@ def main():
     def run_query_on_dataset(_, query, weight, toggle_values):
         if 'sortby' in query.lower():
             return no_update
-        
         if weight is None:
             weight = 1.0
         un_discard = 'undiscard' in toggle_values
@@ -2397,7 +2357,6 @@ def main():
             'paddingLeft': '0.01vw'
         })
 
-
     @app.callback(
         Input('run-eval-data-query', 'n_clicks'),
         State('eval-data-query-input', 'value'),
@@ -2447,7 +2406,6 @@ def main():
 
         return no_update
 
-
     @app.callback(
         Output('train-data-table', 'data', allow_duplicate=True),
         Input('train-data-table', 'data'),
@@ -2473,7 +2431,6 @@ def main():
             return prev_data
         return current_data
 
-
     @app.callback(
         Output('eval-data-table', 'data', allow_duplicate=True),
         Input('eval-data-table', 'data'),
@@ -2498,7 +2455,6 @@ def main():
                     r['Discarded'] = True
             return prev_data
         return current_data
-
 
     @app.callback(
         Output('train-sort-store', 'data'),
