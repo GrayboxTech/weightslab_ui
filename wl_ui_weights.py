@@ -127,21 +127,6 @@ def send_to_controller_hyper_parameters_on_change(
     stub.ExperimentCommand(request)
     return button_children
 
-# @app.callback(
-#     Output('resume-pause-train-btn', 'children', allow_duplicate=True),
-#     Input('resume-pause-train-btn', 'n_clicks'),
-#     prevent_initial_call=True
-# )
-# def toggle_training(n_clicks):
-#     is_training = n_clicks % 2 == 1
-#     hyper_parameter = pb2.HyperParameters()
-#     hyper_parameter.is_training = is_training
-#     request = pb2.TrainerCommand(
-#         hyper_parameter_change=pb2.HyperParameterCommand(
-#             hyper_parameters=hyper_parameter))
-#     stub.ExperimentCommand(request)
-#     return get_pause_button_html_elements() if is_training else get_play_button_html_elements()
-
 @app.callback(
     Output({'type': 'layer-data-table', 'layer_id': MATCH}, 'columns'),
     Output({'type': 'layer-data-table', 'layer_id': MATCH}, 'data'),
@@ -282,6 +267,20 @@ def run_query_on_neurons(_, query, weight, action):
     elif action == "freeze":
         weight_operation=pb2.WeightOperation(
             op_type=pb2.WeightOperationType.FREEZE)
+    elif action == "add_neurons":
+        selected_df = ui_state.get_layers_df().query(query)
+        try:
+            n = int(weight) if weight else 1
+        except:
+            print(f"Invalid weight parameter for add_neurons: {weight}")
+            return
+        for _, row in selected_df.iterrows():
+            op = pb2.WeightOperation(
+                op_type=pb2.WeightOperationType.ADD_NEURONS,
+                layer_id=row['layer_id'],
+                neurons_to_add=n
+            )
+            stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=op))
 
     if weight_operation:
         for idx, row in selected_neurons_df.reset_index().iterrows():
