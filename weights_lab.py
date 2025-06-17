@@ -125,6 +125,11 @@ def exponential_smoothing(values, alpha=0.6):
             smoothed_values.append(smoothed_val)
     return smoothed_values
 
+def subsample_df(df, max_points=1000):
+    if len(df) <= max_points:
+        return df
+    return df.iloc[np.linspace(0, len(df)-1, max_points).astype(int)]
+
 
 @dataclass
 class PlotPoint:
@@ -233,7 +238,10 @@ class UIState:
 
         if relevant_df.empty:
             return []
-        plot = go.Scatter(
+
+        relevant_df = subsample_df(relevant_df, max_points=1000)
+
+        plot = go.Scattergl(
             x=relevant_df["model_age"],
             y=relevant_df["metric_value"],
             mode='lines',
@@ -278,7 +286,7 @@ class UIState:
                 continue
             if not metric_name_2_annot_values[met_name]:
                 continue
-            anot = go.Scatter(
+            anot = go.Scattergl(
                 x=relevant_df["model_age"],
                 y=metric_name_2_annot_values[met_name],
                 mode='markers',
@@ -915,6 +923,7 @@ def get_neuron_query_input_div(ui_state: UIState):
                     {"label": "Delete", "value": "delete"},
                     {"label": "Reinitialize", "value": "reinitialize"},
                     {"label": "Freeze", "value": "freeze"},
+                    {"label": "Add Neurons", "value": "add_neurons"},
                 ],
                 value="highlight",  # Default value
                 placeholder="Select an action",  # Placeholder text
