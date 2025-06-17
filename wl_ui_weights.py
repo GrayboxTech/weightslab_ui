@@ -61,7 +61,6 @@ def refresh_ui_state():
             ui_state.update_from_server_state(updated_state)
         except Exception as e:
             print("Error updating UI state:", e)
-        time.sleep(5)
 
 thread = threading.Thread(target=refresh_ui_state, daemon=True)
 thread.start()
@@ -240,7 +239,6 @@ def run_query_on_neurons(_, query, weight, action):
         print(f"Error: {e} ", ui_state.neurons_df)
         return
 
-    # print("Selected neurons:", selected_neurons_df)
     sample_params = {}
     if weight <= 1.0:
         sample_params["frac"] = weight
@@ -275,12 +273,11 @@ def run_query_on_neurons(_, query, weight, action):
             print(f"Invalid weight parameter for add_neurons: {weight}")
             return
         for _, row in selected_df.iterrows():
-            op = pb2.WeightOperation(
+            weight_operation = pb2.WeightOperation(
                 op_type=pb2.WeightOperationType.ADD_NEURONS,
                 layer_id=row['layer_id'],
                 neurons_to_add=n
             )
-            stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=op))
 
     if weight_operation:
         for idx, row in selected_neurons_df.reset_index().iterrows():
@@ -291,11 +288,20 @@ def run_query_on_neurons(_, query, weight, action):
             weight_operation.neuron_ids.extend([neuron_id])
 
     if weight_operation:
+        if action in ("add_neurons", "delete"):
+            pause_training()
         request = pb2.WeightsOperationRequest(
             weight_operation=weight_operation)
         print(f"Weight operation request: {request}")
         response = stub.ManipulateWeights(request)
         print(f"Weight operation response: {response}")
+        # UI state refresh immediately
+        ui_state.update_from_server_state(
+            stub.ExperimentCommand(pb2.TrainerCommand(
+                get_hyper_parameters=True,
+                get_interactive_layers=True,
+            ))
+        )
 
 
 if __name__ == '__main__':
