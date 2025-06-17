@@ -263,6 +263,7 @@ def run_query_on_neurons(_, query, weight, action):
     elif action == "freeze":
         weight_operation=pb2.WeightOperation(
             op_type=pb2.WeightOperationType.FREEZE)
+
     elif action == "add_neurons":
         selected_df = ui_state.get_layers_df().query(query)
         try:
@@ -271,11 +272,12 @@ def run_query_on_neurons(_, query, weight, action):
             print(f"Invalid weight parameter for add_neurons: {weight}")
             return
         for _, row in selected_df.iterrows():
-            weight_operation = pb2.WeightOperation(
+            op = pb2.WeightOperation(
                 op_type=pb2.WeightOperationType.ADD_NEURONS,
                 layer_id=row['layer_id'],
                 neurons_to_add=n
             )
+            stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=op))
 
     if weight_operation:
         for idx, row in selected_neurons_df.reset_index().iterrows():
