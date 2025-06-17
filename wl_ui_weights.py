@@ -272,12 +272,11 @@ def run_query_on_neurons(_, query, weight, action):
             print(f"Invalid weight parameter for add_neurons: {weight}")
             return
         for _, row in selected_df.iterrows():
-            op = pb2.WeightOperation(
+            weight_operation = pb2.WeightOperation(
                 op_type=pb2.WeightOperationType.ADD_NEURONS,
                 layer_id=row['layer_id'],
                 neurons_to_add=n
             )
-            stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=op))
 
     if weight_operation:
         for idx, row in selected_neurons_df.reset_index().iterrows():
@@ -288,6 +287,8 @@ def run_query_on_neurons(_, query, weight, action):
             weight_operation.neuron_ids.extend([neuron_id])
 
     if weight_operation:
+        if action in ("add_neurons", "delete"):
+            pause_training()
         request = pb2.WeightsOperationRequest(
             weight_operation=weight_operation)
         print(f"Weight operation request: {request}")
