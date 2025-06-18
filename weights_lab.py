@@ -456,7 +456,18 @@ class UIState:
                 status.metrics_status.name,
                 status.metrics_status.value,
             ]
+            #TODO Add sanity check, so we dont violate time consistency.
             with self.metrics_lock:
+                same_exp_met = self.metrics_df[
+                    (self.metrics_df["experiment_name"] == status.experiment_name)
+                    & (self.metrics_df["metric_name"] == status.metrics_status.name)
+                ]
+                if not same_exp_met.empty:
+                    max_prev_age = same_exp_met["model_age"].max()
+                    if status.model_age <= max_prev_age:
+                        print(f"[Warning] Skipping out-of-order metric update: "
+                            f"{[status.experiment_name, status.model_age, status.metrics_status.name, status.metrics_status.value]} <= previous age: {max_prev_age}")
+                        return
                 self.metrics_df.loc[len(self.metrics_df)] = metrics_row
 
             self.plot_name_2_curr_head_point[status.metrics_status.name] = \
