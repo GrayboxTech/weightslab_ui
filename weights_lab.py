@@ -479,7 +479,7 @@ class UIState:
             self.met_names.add(status.metrics_status.name)
 
             if status.experiment_name not in self.exp_name_2_color:
-                self.exp_name_2_color[not status.experiment_name] = \
+                self.exp_name_2_color[status.experiment_name] = \
                     _PLOTS_COLOR_WHEEL[ \
                         len(self.exp_names) % len(_PLOTS_COLOR_WHEEL)]
         elif status.HasField("annotat_status"):
