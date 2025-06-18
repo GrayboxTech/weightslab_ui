@@ -126,7 +126,7 @@ def exponential_smoothing(values, alpha=0.6):
             smoothed_values.append(smoothed_val)
     return smoothed_values
 
-<<<<<<< HEAD
+
 def display_label_or_mask(arr, task_type):
     arr = np.array(arr, dtype=int)
     if arr.size == 0:
@@ -141,13 +141,11 @@ def display_label_or_mask(arr, task_type):
         return summary
     else:
         return str(arr)
-=======
+
 def subsample_df(df, max_points=1000):
     if len(df) <= max_points:
         return df
     return df.iloc[np.linspace(0, len(df)-1, max_points).astype(int)]
-
->>>>>>> 0f2f44d (<wl_ui_weights.py>Add add_neurons in query to add multiple neurons at once and subsample_df to limit the number of data points plotted.)
 
 @dataclass
 class PlotPoint:
