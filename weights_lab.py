@@ -125,12 +125,6 @@ def exponential_smoothing(values, alpha=0.6):
             smoothed_values.append(smoothed_val)
     return smoothed_values
 
-def subsample_df(df, max_points=1000):
-    if len(df) <= max_points:
-        return df
-    return df.iloc[np.linspace(0, len(df)-1, max_points).astype(int)]
-
-
 @dataclass
 class PlotPoint:
     x: float | None
@@ -239,7 +233,13 @@ class UIState:
         if relevant_df.empty:
             return []
 
-        relevant_df = subsample_df(relevant_df, max_points=1000)
+        n_points = len(relevant_df)
+        if n_points <= 250:
+            pass
+        else:
+            n_sample = max(1, int(0.25 * n_points))
+            relevant_df = relevant_df.sample(n=n_sample, random_state=42).sort_values('model_age')
+
 
         plot = go.Scattergl(
             x=relevant_df["model_age"],
