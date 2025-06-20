@@ -186,7 +186,6 @@ def add_neuron(n_clicks):
     if not triggered: return dash.no_update
 
     layer_id = triggered['layer_id']
-    pause_training()
     op = pb2.WeightOperation(
         op_type=pb2.WeightOperationType.ADD_NEURONS,
         layer_id=layer_id,
@@ -194,11 +193,11 @@ def add_neuron(n_clicks):
     )
     stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=op))
 
-    zerofy_op = pb2.WeightOperation(
-        op_type=pb2.WeightOperationType.ZEROFY,
-        layer_id=layer_id
-    )
-    stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=zerofy_op))
+    # zerofy_op = pb2.WeightOperation(
+    #     op_type=pb2.WeightOperationType.ZEROFY,
+    #     layer_id=layer_id
+    # )
+    # stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=zerofy_op))
 
     return n_clicks
 
@@ -213,7 +212,6 @@ def remove_neuron(n_clicks):
 
     layer_id = triggered['layer_id']
     layer_row = ui_state.get_layer_df_row_by_id(layer_id)
-    pause_training()
     op = pb2.WeightOperation(
         op_type=pb2.WeightOperationType.REMOVE_NEURONS,
         neuron_ids=[pb2.NeuronId(layer_id=layer_id, neuron_id=layer_row.outgoing - 1)]
@@ -288,8 +286,6 @@ def run_query_on_neurons(_, query, weight, action):
             weight_operation.neuron_ids.extend([neuron_id])
 
     if weight_operation:
-        if action in ("add_neurons", "delete"):
-            pause_training()
         request = pb2.WeightsOperationRequest(
             weight_operation=weight_operation)
         print(f"Weight operation request: {request}")
