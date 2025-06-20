@@ -83,6 +83,50 @@ eval_grid_dropdown = dcc.Dropdown(
     style={'width': '6vw'}
 )
 
+
+def render_images(sample_ids, selected_ids, origin):
+    imgs = []
+    try:
+        batch_response = stub.GetSamples(pb2.BatchSampleRequest(
+            sample_ids=sample_ids,
+            origin=origin
+        ))
+
+        for sample in batch_response.samples:
+            sid = sample.sample_id
+            b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+            border = '4px solid red' if sid in selected_ids else '1px solid #ccc'
+            imgs.append(html.Div(
+                html.Img(
+                    src=f'data:image/png;base64,{b64}',
+                    style={
+                        'width': '128px',
+                        'height': '128px',
+                        'margin': '0.1vh',
+                        'border': border,
+                        'objectFit': 'contain',
+                        'imageRendering': 'auto'
+                    }
+                ),
+                id={'type': 'sample-img-click', 'sample_id': sid, 'origin': origin},
+                n_clicks=0
+            ))
+    except Exception as e:
+        print(f"[ERROR] {origin} sample rendering failed: {e}")
+        return no_update
+
+    cols = isqrt(len(sample_ids)) or 1
+    return html.Div(children=imgs, style={
+        'display': 'grid',
+        'gridTemplateColumns': f'repeat({cols}, 1fr)',
+        'columnGap': '0.1vw',
+        'rowGap': '0.1vh',
+        'justifyItems': 'center',
+        'alignItems': 'center',
+        'paddingLeft': '0.01vw'
+    })
+
+
 def get_data_tab(ui_state: UIState):
     cols = []
     for column in _DISPLAY_COLUMNS:
@@ -286,7 +330,6 @@ app.layout = html.Div([
     get_data_tab(ui_state),
     dcc.Store(id='train-sort-store', data=None),
     dcc.Store(id='eval-sort-store', data=None),
-    dcc.Store(id='highlighted-sample-ids', data=[]),
 ])
 
 @app.callback(
@@ -394,70 +437,38 @@ def update_eval_page_size(grid_count):
     return grid_count
 
 @app.callback(
-    Output('train-sample-panel', 'children', allow_duplicate= True),
+    Output('train-sample-panel', 'children', allow_duplicate=True),
+    Output('eval-sample-panel', 'children', allow_duplicate=True),
     Input('train-data-table', 'derived_viewport_data'),
     Input('train-data-table', 'selected_rows'),
+    Input('eval-data-table', 'derived_viewport_data'),
+    Input('eval-data-table', 'selected_rows'),
     Input('sample-inspect-checkboxes', 'value'),
+    Input('eval-sample-inspect-checkboxes', 'value'),
     Input('data-tabs', 'value'),
-    Input('highlighted-sample-ids', 'data'),
     prevent_initial_call=True
 )
-def render_visible_train_samples(viewport_data, selected_rows, inspect_flags, active_tab, selected_sample_ids_from_store):
-    if active_tab != 'train' or 'inspect_sample_on_click' not in inspect_flags:
-        return no_update
-    if 'inspect_sample_on_click' not in inspect_flags:
-        return no_update
+def render_samples(
+    train_viewport, train_selected_rows,
+    eval_viewport, eval_selected_rows,
+    train_flags, eval_flags,
+    tab
+):
+    panels = [no_update, no_update]
 
-    if not viewport_data:
-        return []
+    if tab == 'train' and 'inspect_sample_on_click' in train_flags and train_viewport:
+        df = ui_state.samples_df
+        ids = [row['SampleId'] for row in train_viewport if row['SampleId'] in df['SampleId'].values]
+        selected_ids = set(df.iloc[i]['SampleId'] for i in train_selected_rows or [])
+        panels[0] = render_images(ids, selected_ids, origin='train')
 
-    current_ids = set(ui_state.samples_df['SampleId'].values)
-    sample_ids = [row['SampleId'] for row in viewport_data if row['SampleId'] in current_ids]
+    elif tab == 'eval' and 'inspect_sample_on_click' in eval_flags and eval_viewport:
+        df = ui_state.eval_samples_df
+        ids = [row['SampleId'] for row in eval_viewport if row['SampleId'] in df['SampleId'].values]
+        selected_ids = set(df.iloc[i]['SampleId'] for i in eval_selected_rows or [])
+        panels[1] = render_images(ids, selected_ids, origin='eval')
 
-    selected_sample_ids = set(selected_sample_ids_from_store)
-    if selected_rows:
-        df_records = ui_state.samples_df.reset_index(drop=True).to_dict('records')
-        for idx in selected_rows:
-            if 0 <= idx < len(df_records):
-                selected_sample_ids.add(df_records[idx]['SampleId'])
-
-    imgs = []
-    try:
-        batch_response = stub.GetSamples(pb2.BatchSampleRequest(
-            sample_ids=sample_ids,
-            origin='train'
-        ))
-
-        for sample in batch_response.samples:
-            sid = sample.sample_id
-            b64 = base64.b64encode(sample.raw_data).decode('utf-8')
-            border = '4px solid red' if sid in selected_sample_ids else '1px solid #ccc'
-            imgs.append(html.Img(
-                src=f'data:image/png;base64,{b64}',
-                style={
-                    'width': '128px',
-                    'height': '128px',
-                    'margin': '0.1vh',
-                    'border': border,
-                    'objectFit': 'contain',
-                    'imageRendering': 'auto'
-                }
-            ))
-    except Exception as e:
-        print(f"[ERROR] Batch sample rendering failed: {e}")
-        return no_update
-
-
-    cols = rows = isqrt(len(sample_ids))
-    return html.Div(children=imgs, style={
-        'display': 'grid',
-        'gridTemplateColumns': f'repeat({cols}, 1fr)',
-        'columnGap': '0.1vw',
-        'rowGap': '0.1vh',
-        'justifyItems': 'center',
-        'alignItems': 'center',
-        'paddingLeft': '0.01vw'
-    })
+    return panels
 
 
 @app.callback(
@@ -507,71 +518,6 @@ def run_query_on_dataset(_, query, weight, toggle_values):
         print(f"[ERROR] Train query failed: {e}")
 
     return no_update
-
-@app.callback(
-    Output('eval-sample-panel', 'children', allow_duplicate=True),
-    Input('eval-data-table', 'derived_viewport_data'),
-    Input('eval-data-table', 'selected_rows'),
-    Input('eval-sample-inspect-checkboxes', 'value'),
-    Input('data-tabs', 'value'),
-    Input('highlighted-sample-ids', 'data'),
-    prevent_initial_call=True
-)
-def render_visible_eval_samples(viewport_data, selected_rows, inspect_flags, active_tab, selected_sample_ids_from_store):
-    if active_tab != 'eval' or 'inspect_sample_on_click' not in inspect_flags:
-        return no_update
-    if 'inspect_sample_on_click' not in inspect_flags:
-        return no_update
-
-    if not viewport_data:
-        return []
-
-    current_ids = set(ui_state.eval_samples_df['SampleId'].values)
-    sample_ids = [row['SampleId'] for row in viewport_data if row['SampleId'] in current_ids]
-
-    selected_sample_ids = set(selected_sample_ids_from_store)
-    if selected_rows:
-        df_records = ui_state.eval_samples_df.reset_index(drop=True).to_dict('records')
-        for idx in selected_rows:
-            if 0 <= idx < len(df_records):
-                selected_sample_ids.add(df_records[idx]['SampleId'])
-
-    imgs = []
-    try:
-        batch_response = stub.GetSamples(pb2.BatchSampleRequest(
-            sample_ids=sample_ids,
-            origin='eval'
-        ))
-
-        for sample in batch_response.samples:
-            sid = sample.sample_id
-            b64 = base64.b64encode(sample.raw_data).decode('utf-8')
-            border = '4px solid red' if sid in selected_sample_ids else '1px solid #ccc'
-            imgs.append(html.Img(
-                src=f'data:image/png;base64,{b64}',
-                style={
-                    'width': '128px',
-                    'height': '128px',
-                    'margin': '0.1vh',
-                    'border': border,
-                    'objectFit': 'contain',
-                    'imageRendering': 'auto'
-                }
-            ))
-    except Exception as e:
-        print(f"[ERROR] Eval sample rendering failed: {e}")
-        return no_update
-
-    cols = rows = isqrt(len(sample_ids)) or 1
-    return html.Div(children=imgs, style={
-        'display': 'grid',
-        'gridTemplateColumns': f'repeat({cols}, 1fr)',
-        'columnGap': '0.1vw',
-        'rowGap': '0.1vh',
-        'justifyItems': 'center',
-        'alignItems': 'center',
-        'paddingLeft': '0.01vw'
-    })
 
 
 @app.callback(
@@ -731,15 +677,34 @@ def sort_eval_table(_, query):
     return {'cols': cols, 'dirs': dirs} if cols else None
 
 @app.callback(
-    Output('highlighted-sample-ids', 'data'),
-    Input('train-data-table', 'selected_rows'),
+    Output('train-data-table', 'selected_rows'),
+    Output('eval-data-table', 'selected_rows'),
+    Input({'type': 'sample-img-click', 'sample_id': ALL, 'origin': ALL}, 'n_clicks'),
     State('train-data-table', 'data'),
+    State('eval-data-table', 'data'),
     prevent_initial_call=True
 )
-def store_highlighted_samples(selected_rows, table_data):
-    if not selected_rows or not table_data:
-        return []
-    return [table_data[i]['SampleId'] for i in selected_rows]
+def update_selection_from_image_click(all_clicks, train_data, eval_data):
+    if not any(all_clicks):
+        return dash.no_update, dash.no_update
+
+    # Get the triggered image ID
+    triggered = ctx.triggered_id
+    if not triggered or "sample_id" not in triggered:
+        return dash.no_update, dash.no_update
+
+    sid = triggered["sample_id"]
+    origin = triggered["origin"]
+
+    if origin == "train":
+        idx = next((i for i, row in enumerate(train_data) if row["SampleId"] == sid), None)
+        return [idx] if idx is not None else [], dash.no_update
+
+    elif origin == "eval":
+        idx = next((i for i, row in enumerate(eval_data) if row["SampleId"] == sid), None)
+        return dash.no_update, [idx] if idx is not None else []
+
+    return dash.no_update, dash.no_update
 
 
 if __name__ == '__main__':
