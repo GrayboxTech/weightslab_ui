@@ -18,7 +18,10 @@ from scope_timer import ScopeTimer
 
 import torch
 from scope_timer import ScopeTimer
-# from fashion_mnist_exp import get_exp
+
+import torch
+from scope_timer import ScopeTimer
+from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
 # from imagenet_exp import get_exp
@@ -26,7 +29,7 @@ from scope_timer import ScopeTimer
 # from imagenet_effnet_exp import get_exp
 
 from segmentation_exp import get_exp
-# from cad_models_exp import get_exp
+# #from cad_models_exp import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
@@ -34,9 +37,10 @@ experiment = get_exp()
 
 def training_thread_callback():
     while True:
-        print("Training thread callback ", str(experiment), end="\r")
+        # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
+            # print(f"[TRAINING] Remaining steps: {experiment.training_steps_to_do}")
 
 
 training_thread = Thread(target=training_thread_callback)

@@ -287,8 +287,6 @@ def run_query_on_neurons(_, query, weight, action):
             weight_operation.neuron_ids.extend([neuron_id])
 
     if weight_operation:
-        if action in ("add_neurons", "delete"):
-            pause_training()
         request = pb2.WeightsOperationRequest(
             weight_operation=weight_operation)
         print(f"Weight operation request: {request}")
