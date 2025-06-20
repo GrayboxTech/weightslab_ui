@@ -30,13 +30,21 @@ stub = pb2_grpc.ExperimentServiceStub(channel)
 ui_state = UIState(args.root_directory)
 
 # Initial fetch
-initial_state = stub.ExperimentCommand(pb2.TrainerCommand(get_hyper_parameters=True))
+initial_state = stub.ExperimentCommand(
+    pb2.TrainerCommand(
+        get_hyper_parameters=True,
+        get_interactive_layers=True,
+        # get_data_records="train"
+    )
+)
 ui_state.update_from_server_state(initial_state)
 
 def refresh_ui_state():
     while True:
         try:
-            update_request = pb2.TrainerCommand(get_hyper_parameters=True)
+            update_request = pb2.TrainerCommand(
+                get_hyper_parameters=True,
+                get_interactive_layers = True)
             updated_state = stub.ExperimentCommand(update_request)
             ui_state.update_from_server_state(updated_state)
         except Exception as e:
@@ -44,6 +52,13 @@ def refresh_ui_state():
         time.sleep(5)
 
 threading.Thread(target=refresh_ui_state, daemon=True).start()
+
+def retrieve_training_statuses():
+    global ui_state, stub
+    for status in stub.StreamStatus(pb2.Empty()):
+        ui_state.update_metrics_from_server(status)
+
+threading.Thread(target=retrieve_training_statuses, daemon=True).start()
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.ZEPHYR])
 app.title = "WeightsLab - Plots Only"
