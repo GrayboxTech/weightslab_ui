@@ -19,6 +19,7 @@ from weightslab.modules_with_ops import BatchNorm2dWithNeuronOps
 
 from weightslab.tracking import TrackingMode
 from weightslab.tracking import add_tracked_attrs_to_input_tensor
+from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
 
 
 from board import Dash
@@ -111,6 +112,10 @@ test_set = ds.MNIST(
 # device = th.device("cuda:0")
 device = th.device("cpu")
 
+metrics = {
+        "acc": MulticlassAccuracy(num_classes=10, average="micro").to(device),
+        "f1": MulticlassF1Score(num_classes=10, average="macro").to(device),
+    }
 
 def get_exp():
     model = FashionCNN()
@@ -119,10 +124,15 @@ def get_exp():
         model=model, optimizer_class=optim.Adam,
         train_dataset=train_set,
         eval_dataset=test_set,
-        device=device, learning_rate=1e-3, batch_size=100,
+        device=device, 
+        learning_rate=1e-3, 
+        batch_size=100,
+        criterion=nn.CrossEntropyLoss(reduction='none'),
+        metrics=metrics,
+        training_steps_to_do=30000,
         name="v0",
-        root_log_dir='mnist-dev-exp7',
-        logger=Dash("mnist-dev-exp7"),
+        root_log_dir='mnist-dev-exp',
+        logger=Dash("mnist-dev-exp"),
         skip_loading=False)
 
     def stateful_difference_monitor_callback():
