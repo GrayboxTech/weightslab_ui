@@ -283,9 +283,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         global experiment
         while True:
             log = experiment.logger.queue.get()
-            if "metric_name" in log and "acc" in log["metric_name"]:
-                # print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
-                pass
+            if "metric_name" in log:
+                print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
 
             if log is None:
                 break
