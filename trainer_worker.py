@@ -21,8 +21,7 @@ from fashion_mnist_exp import get_exp
 # from imagenet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
-
-# from cad_models_exp import get_exp
+#from cad_models_exp import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
