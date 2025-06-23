@@ -14,14 +14,14 @@ import experiment_service_pb2_grpc as pb2_grpc
 from collections import defaultdict
 
 from scope_timer import ScopeTimer
-# from fashion_mnist_exp import get_exp
+from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
 # from imagenet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
 
-from cad_models_exp import get_exp
+# from cad_models_exp import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
@@ -212,7 +212,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         global experiment
         while True:
             log = experiment.logger.queue.get()
-            if "metric_name" in log and "acc" in log["metric_name"]:
+            if "metric_name" in log:
                 print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
 
             if log is None:
