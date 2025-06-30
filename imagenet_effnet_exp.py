@@ -31,8 +31,11 @@ transform_test = tt.Compose([
     tt.Normalize(mean, std)
 ])
 
-train_set = ImageFolder('./data/tiny-imagenet-200/train', transform=transform_train)
-test_set = ImageFolder('./data/tiny-imagenet-200/val/classified', transform=transform_test)
+data_dir = "/home/rotaru/Desktop/work/graybox/tiny-224/"
+
+
+train_set = ImageFolder(data_dir + 'train', transform=transform_train)
+test_set = ImageFolder(data_dir + 'val', transform=transform_test)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

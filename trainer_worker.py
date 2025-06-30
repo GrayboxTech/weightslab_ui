@@ -19,6 +19,7 @@ from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
 # from imagenet_exp import get_exp
+from imagenet_effnet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
 
