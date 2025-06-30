@@ -8,6 +8,7 @@ from concurrent import futures
 from threading import Thread
 from PIL import Image
 from typing import List, Tuple, Iterable
+from weightslab.experiment import ArchitectureOpType
 
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
@@ -29,9 +30,10 @@ experiment = get_exp()
 
 def training_thread_callback():
     while True:
-        print("Training thread callback ", str(experiment), end="\r")
+        # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
+            # print(f"[TRAINING] Remaining steps: {experiment.training_steps_to_do}")
 
 
 training_thread = Thread(target=training_thread_callback)
@@ -426,7 +428,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         answer = pb2.WeightsOperationResponse(
             success=False, message="Unknown error")
         weight_operations = request.weight_operation
-
+        #TODO: All the access of the model should be done via experiment
         if weight_operations.op_type == pb2.WeightOperationType.REMOVE_NEURONS:
             layer_id_to_neuron_ids_list = defaultdict(list)
             for neuron_id in weight_operations.neuron_ids:
@@ -435,7 +437,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     neuron_id.neuron_id)
 
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
-                experiment.model.prune(
+                experiment.apply_architecture_op(
+                    op_type = ArchitectureOpType.PRUNE,
                     layer_id=layer_id,
                     neuron_indices=set(neuron_ids))
 
@@ -443,7 +446,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 success=True,
                 message=f"Pruned {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.ADD_NEURONS:
-            experiment.model.add_neurons(
+            experiment.apply_architecture_op(
+                op_type = ArchitectureOpType.ADD_NEURONS,
                 layer_id=weight_operations.layer_id,
                 neuron_count=weight_operations.neurons_to_add)
             answer = pb2.WeightsOperationResponse(
@@ -458,7 +462,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 layer_id_to_neuron_ids_list[layer_id].append(
                     neuron_id.neuron_id)
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
-                experiment.model.freeze(
+                experiment.apply_architecture_op(
+                    op_type = ArchitectureOpType.FREEZE,
                     layer_id=layer_id,
                     neuron_ids=neuron_ids)
             answer = pb2.WeightsOperationResponse(
@@ -466,7 +471,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 message=f"Frozen {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.REINITIALIZE:
             for neuron_id in weight_operations.neuron_ids:
-                experiment.model.reinit_neurons(
+                experiment.apply_architecture_op(
+                    op_type = ArchitectureOpType.REINITIALIZE,
                     layer_id=neuron_id.layer_id,
                     neuron_indices={neuron_id.neuron_id})
 
