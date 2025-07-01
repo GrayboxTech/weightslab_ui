@@ -37,7 +37,7 @@ initial_state = stub.ExperimentCommand(
     pb2.TrainerCommand(
         get_hyper_parameters=True,
         get_interactive_layers=False,
-        # get_data_records="train"
+        get_data_records="train"
     )
 )
 ui_state.update_from_server_state(initial_state)
@@ -89,27 +89,26 @@ def render_images(sample_ids, selected_ids, origin):
     try:
         batch_response = stub.GetSamples(pb2.BatchSampleRequest(
             sample_ids=sample_ids,
-            origin=origin
+            origin=origin,
+            resize_width=256,
+            resize_height=256
         ))
 
         for sample in batch_response.samples:
             sid = sample.sample_id
             b64 = base64.b64encode(sample.raw_data).decode('utf-8')
             border = '4px solid red' if sid in selected_ids else '1px solid #ccc'
-            imgs.append(html.Div(
-                html.Img(
-                    src=f'data:image/png;base64,{b64}',
-                    style={
-                        'width': '128px',
-                        'height': '128px',
-                        'margin': '0.1vh',
-                        'border': border,
-                        'objectFit': 'contain',
-                        'imageRendering': 'auto'
-                    }
-                ),
-                id={'type': 'sample-img-click', 'sample_id': sid, 'origin': origin},
-                n_clicks=0
+            imgs.append(html.Img(
+                src=f'data:image/png;base64,{b64}',
+                style={
+                    'width': '128px',
+                    'height': '128px',
+                    'margin': '0.1vh',
+                    'border': border,
+                    'transition': 'border 0.3s ease-in-out',
+                    'objectFit': 'contain',
+                    'imageRendering': 'auto'
+                }
             ))
     except Exception as e:
         print(f"[ERROR] {origin} sample rendering failed: {e}")
@@ -121,6 +120,7 @@ def render_images(sample_ids, selected_ids, origin):
         'gridTemplateColumns': f'repeat({cols}, 1fr)',
         'columnGap': '0.1vw',
         'rowGap': '0.1vh',
+        'width': 'auto',
         'justifyItems': 'center',
         'alignItems': 'center',
         'paddingLeft': '0.01vw'
@@ -150,9 +150,9 @@ def get_data_tab(ui_state: UIState):
         editable=True,
         virtualization=True,
         style_table={
-            'height': '25vh',
+            'height': 'auto',
             'overflowY': 'auto',
-            'width': '38vw',
+            'width': '35vw',
             'margin': '2px',
             'padding': '2px'
         },
@@ -171,9 +171,9 @@ def get_data_tab(ui_state: UIState):
         editable=True,
         virtualization=True,
         style_table={
-            'height': '25vh',
+            'height': 'auto',
             'overflowY': 'auto',
-            'width': '38vw',
+            'width': '35vw',
             'margin': '2px',
             'padding': '2px'
         },
@@ -222,37 +222,36 @@ def get_data_tab(ui_state: UIState):
 
 
     train_query_div = dbc.Row([
-    dbc.Col(
-        dbc.Input(
-            id='train-data-query-input', type='text',
-            placeholder='Enter train data query',
-            style={'width': '18vw'}
+        dbc.Col(
+            dbc.Input(
+                id='train-data-query-input', type='text',
+                placeholder='Enter train data query',
+                style={'width': '18vw'}
+            ),
         ),
-    ),
-    dbc.Col(
-        dbc.Checklist(
-            id='train-query-discard-toggle',
-            options=[{'label': 'Un-discard', 'value': 'undiscard'}],
-            value=[],
-            inline=True
+        dbc.Col(
+            dbc.Checklist(
+                id='train-query-discard-toggle',
+                options=[{'label': 'Un-discard', 'value': 'undiscard'}],
+                value=[],
+                inline=True
+            ),
         ),
-    ),
-    dbc.Col(
-        dbc.Input(
-            id='data-query-input-weight', type='number',
-            placeholder='weight',
-            style={'width': '4vw'}
+        dbc.Col(
+            dbc.Input(
+                id='data-query-input-weight', type='number',
+                placeholder='weight',
+                style={'width': '4vw'}
+            ),
         ),
-    ),
-    dbc.Col(
-        dbc.Button(
-            "Run", id='run-train-data-query', color='primary',
-            n_clicks=0,
-            style={'width': '3vw'}
+        dbc.Col(
+            dbc.Button(
+                "Run", id='run-train-data-query', color='primary',
+                n_clicks=0,
+                style={'width': '3vw'}
+            ),
         ),
-    ),
-])
-
+    ])
 
     eval_query_div = dbc.Row([
         dbc.Col(
@@ -295,9 +294,26 @@ def get_data_tab(ui_state: UIState):
                     html.H2("Train Dataset"),
                     train_controls,
                     html.Div([
-                        train_table,
-                        html.Div(id='train-sample-panel')
-                    ], style={'display': 'flex', 'gap': '1vw'}),
+                        html.Div([train_table], style={
+                            'flex': '0 0 35vw', 
+                            'minWidth': '35vw'
+                        }),
+                        html.Div([
+                            html.Div(id='train-sample-panel')
+                        ], style={
+                            'flex': '1', 
+                            'minWidth': '400px', 
+                            'height': 'auto',  
+                            'display': 'flex',
+                            'overflow': 'auto',
+                            'alignItems': 'flex-start',
+                            'justifyContent': 'center'
+                        })
+                    ], style={
+                        'display': 'flex', 
+                        'gap': '1vw',
+                        'width': '100%'
+                    }),
                     train_query_div
                 ])
 
@@ -307,9 +323,26 @@ def get_data_tab(ui_state: UIState):
                     html.H2("Eval Dataset"),
                     eval_controls,
                     html.Div([
-                        eval_table,
-                        html.Div(id='eval-sample-panel')
-                    ], style={'display': 'flex', 'gap': '1vw'}),
+                        html.Div([eval_table], style={
+                            'flex': '0 0 35vw',  
+                            'minWidth': '35vw'
+                        }),
+                        html.Div([
+                            html.Div(id='eval-sample-panel')
+                        ], style={
+                            'flex': '1', 
+                            'minWidth': '400px', 
+                            'height': 'auto', 
+                            'overflow': 'auto', 
+                            'display': 'flex',
+                            'alignItems': 'flex-start',
+                            'justifyContent': 'center'
+                        })
+                    ], style={
+                        'display': 'flex', 
+                        'gap': '1vw',
+                        'width': '100%'
+                    }),
                     eval_query_div
                 ])
 
