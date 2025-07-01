@@ -17,16 +17,21 @@ from torchvision import transforms
 from scope_timer import ScopeTimer
 from fashion_mnist_exp import get_exp
 from fashion_mnist_exp import get_exp
+import pickle
+
+from scope_timer import ScopeTimer
+# from fashion_mnist_exp import get_exp
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-# from imagenet_exp import get_exp
+from imagenet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
 
-#from cad_models_exp import get_exp
+# from segmentation_exp import get_exp
+# from cad_models_exp import get_exp
 
 experiment = get_exp()
-# experiment.set_is_training(True)
+experiment.set_is_training(True)
 
 
 def training_thread_callback():
@@ -143,6 +148,20 @@ def get_layer_representations(model):
         layer_representations.append(layer_representation)
     return layer_representations
 
+def make_task_field(name, value):
+    if isinstance(value, float):
+        return pb2.TaskField(name=name, float_value=value)
+    elif isinstance(value, int):
+        return pb2.TaskField(name=name, int_value=value)
+    elif isinstance(value, str):
+        return pb2.TaskField(name=name, string_value=value)
+    elif isinstance(value, bytes):
+        return pb2.TaskField(name=name, bytes_value=value)
+    elif isinstance(value, bool):
+        return pb2.TaskField(name=name, bool_value=value)
+    else:
+        raise ValueError(f"Unsupported value type for TaskField: {name}: {type(value)}")
+
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     # print("[BACKEND].get_data_set_representation", len(dataset.wrapped_dataset))
@@ -150,16 +169,59 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     all_rows = list(dataset.as_records())
     sample_stats = pb2.SampleStatistics()
     sample_stats.sample_count = len(dataset.wrapped_dataset)
+    
+    task_type = getattr(dataset, "task_type", "classification")
 
     for sample_id, row in enumerate(all_rows):
+        label = row.get("label") or row.get("target")
+        prediction_raw = row.get("prediction_raw", None)
+
+        mask_preview = None
+        if task_type == "segmentation" and prediction_raw is not None:
+            if hasattr(prediction_raw, "cpu"):
+                arr = prediction_raw.cpu().numpy()
+            else:
+                arr = np.array(prediction_raw)
+            if arr.ndim == 3 and arr.shape[0] == 1:  # (1, H, W)
+                arr = arr.squeeze(0)
+            try:
+                from PIL import Image
+                img = Image.fromarray(arr.astype(np.uint8))
+                buf = io.BytesIO()
+                img.save(buf, format='PNG')
+                mask_preview = buf.getvalue()
+            except Exception as e:
+                print(f"Could not generate mask preview: {e}")
+
+        prediction_raw_bytes = None
+        if prediction_raw is not None:
+            try:
+                prediction_raw_bytes = pickle.dumps(prediction_raw)
+            except Exception as e:
+                print(f"Could not serialize prediction_raw: {e}")
+
         record = pb2.RecordMetadata(
-        sample_id=sample_id,
-        sample_label=row['label'],
-        sample_prediction=row['predicted_class'],
-        sample_last_loss=row['prediction_loss'],
-        sample_encounters=row['exposure_amount'],
-        sample_discarded=row['deny_listed']
-    )
+            sample_id = row.get('sample_id', sample_id),
+            sample_label = int(label) if label is not None else -1,
+            sample_last_loss = row.get('prediction_loss', -1),
+            sample_encounters = row.get('encountered', row.get('exposure_amount', 0)),
+            sample_discarded = row.get('deny_listed', False),
+            mask_preview = mask_preview if mask_preview is not None else b"",
+            prediction_raw = prediction_raw_bytes if prediction_raw_bytes is not None else b"",
+            task_type = task_type,
+        )
+
+        core_fields = {
+            'label', 'target', 'prediction_raw', 'prediction_loss', 'exposure_amount',
+            'deny_listed', 'sample_id', 'encountered'
+        }
+        for k, v in row.items():
+            if k not in core_fields:
+                try:
+                    record.extra_fields.append(make_task_field(k, v))
+                except Exception as e:
+                    print(f"[EXTRA FIELD ERROR] Could not add extra field '{k}': {e}")
+
         sample_stats.records.append(record)
 
     return sample_stats
@@ -442,8 +504,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
                 experiment.apply_architecture_op(
                     op_type = ArchitectureOpType.PRUNE,
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.PRUNE,
                     layer_id=layer_id,
                     neuron_indices=set(neuron_ids))
 
@@ -451,8 +511,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 success=True,
                 message=f"Pruned {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.ADD_NEURONS:
-            experiment.apply_architecture_op(
-                op_type = ArchitectureOpType.ADD_NEURONS,
             experiment.apply_architecture_op(
                 op_type = ArchitectureOpType.ADD_NEURONS,
                 layer_id=weight_operations.layer_id,
@@ -471,8 +529,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
                 experiment.apply_architecture_op(
                     op_type = ArchitectureOpType.FREEZE,
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.FREEZE,
                     layer_id=layer_id,
                     neuron_ids=neuron_ids)
             answer = pb2.WeightsOperationResponse(
@@ -480,8 +536,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 message=f"Frozen {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.REINITIALIZE:
             for neuron_id in weight_operations.neuron_ids:
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.REINITIALIZE,
                 experiment.apply_architecture_op(
                     op_type = ArchitectureOpType.REINITIALIZE,
                     layer_id=neuron_id.layer_id,

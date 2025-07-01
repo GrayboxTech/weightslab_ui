@@ -91,7 +91,7 @@ _PLOTS_COLOR_WHEEL = [
 ]
 
 _DISPLAY_COLUMNS = [
-    "SampleId", "Label", "Prediction", "LastLoss", "Encounters", "Discarded"
+    "SampleId", "Target", "PredictionRaw", "LastLoss", "Encounters", "Discarded"
 ]
 
 _BUTTON_STYLE = {
@@ -515,20 +515,42 @@ class UIState:
     def update_samples_from_server(self, sample_statistics: pb2.SampleStatistics):
         try:
             rows = []
+            extra_keys = set()
             for record in sample_statistics.records:
-                rows.append({
+                row = {
                     "SampleId": int(record.sample_id),
-                    "Label": int(record.sample_label),
-                    "Prediction": int(record.sample_prediction),
+                    "Target": int(record.sample_label),            
+                    "PredictionRaw": int(record.sample_prediction), 
                     "LastLoss": float(record.sample_last_loss),
                     "Encounters": int(record.sample_encounters),
                     "Discarded": bool(record.sample_discarded),
-                })
+                }
+                for field in getattr(record, "extra_fields", []):
+                    if field.HasField("float_value"):
+                        row[field.name] = field.float_value
+                    elif field.HasField("int_value"):
+                        row[field.name] = field.int_value
+                    elif field.HasField("string_value"):
+                        row[field.name] = field.string_value
+                    elif field.HasField("bytes_value"):
+                        row[field.name] = field.bytes_value
+                    elif field.HasField("bool_value"):
+                        row[field.name] = field.bool_value
+                    else:
+                        row[field.name] = None
+                    extra_keys.add(field.name)
+                rows.append(row)
 
+            all_columns = list(_SAMPLES_DF_COLUMNS) + sorted(extra_keys)
+
+            df = pd.DataFrame(rows)
+            for col in all_columns:
+                if col not in df.columns:
+                    df[col] = None 
             with self.lock:
                 # self.samples_df = pd.DataFrame(rows)
                 if sample_statistics.origin == "train":
-                    self.samples_df = pd.DataFrame(rows)
+                    self.samples_df = df[all_columns]
                 elif sample_statistics.origin == "eval":
                     self.eval_samples_df = pd.DataFrame(rows)
 
