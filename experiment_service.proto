@@ -164,6 +164,17 @@ message LayerRepresentation {
   repeated NeuronStatistics neurons_statistics = 10;
 }
 
+message TaskField {
+  string name = 1;
+  oneof value {
+    float float_value = 2;
+    int32 int_value = 3;
+    string string_value = 4;
+    bytes bytes_value = 5;
+    bool bool_value = 6;
+  }
+}
+
 message RecordMetadata {
   int32 sample_id = 1;
   int32 sample_label = 2;
@@ -171,6 +182,10 @@ message RecordMetadata {
   float sample_last_loss = 4;
   int32 sample_encounters = 5;
   bool sample_discarded = 6;
+  repeated TaskField extra_fields = 7;     
+  bytes mask_preview = 8;                  
+  bytes prediction_raw = 9;                 
+  string task_type = 10;   
 }
 
 message SampleStatistics {
@@ -212,8 +227,6 @@ message SampleRequestResponse {
 message BatchSampleRequest {
   repeated int32 sample_ids = 1;
   string origin = 2;
-  optional int32 resize_width = 3;
-  optional int32 resize_height = 4;
 }
 
 message BatchSampleResponse {
@@ -245,4 +258,3 @@ message WeightsResponse{
   bool success = 11;
   optional string error_message = 12;
 }
-

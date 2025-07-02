@@ -8,26 +8,26 @@ from concurrent import futures
 from threading import Thread
 from PIL import Image
 from typing import List, Tuple, Iterable
-from weightslab.experiment import ArchitectureOpType
 
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 from collections import defaultdict
-from torchvision import transforms
+import pickle
+
 from scope_timer import ScopeTimer
+
 from fashion_mnist_exp import get_exp
-from fashion_mnist_exp import get_exp
+
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
 # from imagenet_exp import get_exp
-from imagenet_effnet_exp import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
-
-#from cad_models_exp import get_exp
+# from segmentation_exp import get_exp
+# from cad_models_exp import get_exp
 
 experiment = get_exp()
-# experiment.set_is_training(True)
+experiment.set_is_training(True)
 
 
 def training_thread_callback():
@@ -35,7 +35,7 @@ def training_thread_callback():
         # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
-            # print(f"[TRAINING] Remaining steps: {experiment.training_steps_to_do}")
+            print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
 
 
 training_thread = Thread(target=training_thread_callback)
@@ -144,23 +144,82 @@ def get_layer_representations(model):
         layer_representations.append(layer_representation)
     return layer_representations
 
+def make_task_field(name, value):
+    if isinstance(value, float):
+        return pb2.TaskField(name=name, float_value=value)
+    elif isinstance(value, int):
+        return pb2.TaskField(name=name, int_value=value)
+    elif isinstance(value, str):
+        return pb2.TaskField(name=name, string_value=value)
+    elif isinstance(value, bytes):
+        return pb2.TaskField(name=name, bytes_value=value)
+    elif isinstance(value, bool):
+        return pb2.TaskField(name=name, bool_value=value)
+    else:
+        raise ValueError(f"Unsupported value type for TaskField: {name}: {type(value)}")
+
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
-    # print("[BACKEND].get_data_set_representation", len(dataset.wrapped_dataset))
+    # print("[BACKEND].get_data_set_representation")
 
     all_rows = list(dataset.as_records())
+
     sample_stats = pb2.SampleStatistics()
+    sample_stats.origin = "train"
     sample_stats.sample_count = len(dataset.wrapped_dataset)
+    
+    task_type = getattr(dataset, "task_type", "classification")
 
     for sample_id, row in enumerate(all_rows):
+        label = row.get("label") or row.get("target")
+        prediction_raw = row.get("prediction_raw", None)
+
+        mask_preview = None
+        if task_type == "segmentation" and prediction_raw is not None:
+            if hasattr(prediction_raw, "cpu"):
+                arr = prediction_raw.cpu().numpy()
+            else:
+                arr = np.array(prediction_raw)
+            if arr.ndim == 3 and arr.shape[0] == 1:  # (1, H, W)
+                arr = arr.squeeze(0)
+            try:
+                from PIL import Image
+                img = Image.fromarray(arr.astype(np.uint8))
+                buf = io.BytesIO()
+                img.save(buf, format='PNG')
+                mask_preview = buf.getvalue()
+            except Exception as e:
+                print(f"Could not generate mask preview: {e}")
+
+        prediction_raw_bytes = None
+        if prediction_raw is not None:
+            try:
+                prediction_raw_bytes = pickle.dumps(prediction_raw)
+            except Exception as e:
+                print(f"Could not serialize prediction_raw: {e}")
+
         record = pb2.RecordMetadata(
-        sample_id=sample_id,
-        sample_label=row['label'],
-        sample_prediction=row['predicted_class'],
-        sample_last_loss=row['prediction_loss'],
-        sample_encounters=row['exposure_amount'],
-        sample_discarded=row['deny_listed']
-    )
+            sample_id = row.get('sample_id', sample_id),
+            sample_label = int(label) if label is not None else -1,
+            sample_last_loss = row.get('prediction_loss', -1),
+            sample_encounters = row.get('encountered', row.get('exposure_amount', 0)),
+            sample_discarded = row.get('deny_listed', False),
+            mask_preview = mask_preview if mask_preview is not None else b"",
+            prediction_raw = prediction_raw_bytes if prediction_raw_bytes is not None else b"",
+            task_type = task_type,
+        )
+
+        core_fields = {
+            'label', 'target', 'prediction_raw', 'prediction_loss', 'exposure_amount',
+            'deny_listed', 'sample_id', 'encountered'
+        }
+        for k, v in row.items():
+            if k not in core_fields:
+                try:
+                    record.extra_fields.append(make_task_field(k, v))
+                except Exception as e:
+                    print(f"[EXTRA FIELD ERROR] Could not add extra field '{k}': {e}")
+
         sample_stats.records.append(record)
 
     return sample_stats
@@ -179,8 +238,7 @@ def tensor_to_bytes(tensor):
 
     img = Image.fromarray(np_img, mode=mode)
     buf = io.BytesIO()
-    # img.save(buf, format='png')
-    img.save(buf, format='jpeg', quality=85)
+    img.save(buf, format='png')
     return buf.getvalue()
 
 def load_raw_image(dataset, index):
@@ -214,9 +272,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         global experiment
         while True:
             log = experiment.logger.queue.get()
-            if "metric_name" in log and "acc" in log["metric_name"]:
-                # print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
-                pass
+            if "metric_name" in log:
+                print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
 
             if log is None:
                 break
@@ -267,14 +324,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 experiment.set_training_steps_to_do(
                     hyper_parameters.training_steps_to_do)
 
-            if hyper_parameters.HasField('full_eval_frequency'):
-                experiment.eval_full_to_train_steps_ratio = \
-                    hyper_parameters.full_eval_frequency
-
-            if hyper_parameters.HasField('checkpont_frequency'):
-                experiment.experiment_dump_to_train_steps_ratio = \
-                    hyper_parameters.checkpont_frequency
-
             if hyper_parameters.HasField('experiment_name'):
                 experiment.set_name(hyper_parameters.experiment_name)
             return pb2.CommandResponse(
@@ -323,8 +372,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     get_layer_representations(experiment.model))
                 # print(response)
         if request.get_data_records:
-            # print(f"ExperimentServiceServicer.get_data_records {request}")
-            # print(f"Experiment: {experiment}")
             if request.get_data_records == "train":
                 response.sample_statistics.CopyFrom(
                     get_data_set_representation(
@@ -340,6 +387,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
     def GetSample(self, request, context):
         # print(f"ExperimentServiceServicer.GetSample({request})")
+
         if not request.HasField('sample_id') or not request.HasField('origin'):
             return pb2.SampleRequestResponse(
                 error_message="Invalid request. Provide sample_id & origin.")
@@ -374,8 +422,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         try:
             pil_img = load_raw_image(dataset, request.sample_id)
             buf = io.BytesIO()
-            # pil_img.save(buf, format='PNG')
-            pil_img.save(buf, format='jpeg', quality=85)
+            pil_img.save(buf, format='PNG')
             raw_image_bytes = buf.getvalue()
         except Exception as e:
             return pb2.SampleRequestResponse(error_message=str(e))
@@ -394,30 +441,19 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
         response = pb2.BatchSampleResponse()
 
-        do_resize = request.HasField("resize_width") and request.HasField("resize_height")
-        resize_dims = (request.resize_width, request.resize_height) if do_resize else None
-
         for sid in request.sample_ids:
             try:
                 tensor, _, label = dataset._getitem_raw(sid)
-                img = transforms.ToPILImage()(tensor)
-                if resize_dims:
-                    img = img.resize(resize_dims, Image.BILINEAR)
-                buf = io.BytesIO()
-                img.save(buf, format='jpeg', quality=85)
-                transformed_bytes = buf.getvalue()
+                transformed = tensor_to_bytes(tensor)
                 raw = load_raw_image(dataset, sid)
-                if resize_dims:
-                    raw = raw.resize(resize_dims, Image.BILINEAR)
-                raw_buf = io.BytesIO()
-                raw.save(raw_buf, format='jpeg', quality=85)
-
+                buf = io.BytesIO()
+                raw.save(buf, format="PNG")
                 sample_response = pb2.SampleRequestResponse(
                     sample_id=sid,
                     origin=request.origin,
                     label=label,
-                    data=transformed_bytes,
-                    raw_data=raw_buf.getvalue()
+                    data=transformed,
+                    raw_data=buf.getvalue()
                 )
                 response.samples.append(sample_response)
             except Exception as e:
@@ -425,14 +461,12 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         return response
 
 
-
     def ManipulateWeights(self, request, context):
         # (f"ExperimentServiceServicer.ManipulateWeights({request})")
         answer = pb2.WeightsOperationResponse(
             success=False, message="Unknown error")
         weight_operations = request.weight_operation
-        #TODO: All the access of the model should be done via experiment
-        #TODO: All the access of the model should be done via experiment
+
         if weight_operations.op_type == pb2.WeightOperationType.REMOVE_NEURONS:
             layer_id_to_neuron_ids_list = defaultdict(list)
             for neuron_id in weight_operations.neuron_ids:
@@ -441,10 +475,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     neuron_id.neuron_id)
 
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.PRUNE,
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.PRUNE,
+                experiment.model.prune(
                     layer_id=layer_id,
                     neuron_indices=set(neuron_ids))
 
@@ -452,10 +483,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 success=True,
                 message=f"Pruned {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.ADD_NEURONS:
-            experiment.apply_architecture_op(
-                op_type = ArchitectureOpType.ADD_NEURONS,
-            experiment.apply_architecture_op(
-                op_type = ArchitectureOpType.ADD_NEURONS,
+            experiment.model.add_neurons(
                 layer_id=weight_operations.layer_id,
                 neuron_count=weight_operations.neurons_to_add)
             answer = pb2.WeightsOperationResponse(
@@ -470,10 +498,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 layer_id_to_neuron_ids_list[layer_id].append(
                     neuron_id.neuron_id)
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.FREEZE,
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.FREEZE,
+                experiment.model.freeze(
                     layer_id=layer_id,
                     neuron_ids=neuron_ids)
             answer = pb2.WeightsOperationResponse(
@@ -481,10 +506,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 message=f"Frozen {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.REINITIALIZE:
             for neuron_id in weight_operations.neuron_ids:
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.REINITIALIZE,
-                experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.REINITIALIZE,
+                experiment.model.reinit_neurons(
                     layer_id=neuron_id.layer_id,
                     neuron_indices={neuron_id.neuron_id})
 
