@@ -230,8 +230,6 @@ message SampleRequestResponse {
 message BatchSampleRequest {
   repeated int32 sample_ids = 1;
   string origin = 2;
-  optional int32 resize_width = 3;
-  optional int32 resize_height = 4;
 }
 
 message BatchSampleResponse {
@@ -263,4 +261,3 @@ message WeightsResponse{
   bool success = 11;
   optional string error_message = 12;
 }
-
