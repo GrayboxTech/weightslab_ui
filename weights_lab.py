@@ -1502,7 +1502,7 @@ def main():
     get_initial_state_request = pb2.TrainerCommand(
         get_hyper_parameters=True,
         get_interactive_layers=True,
-        # get_data_records="train",
+        get_data_records="train",
     )
     print("[UI] About Fetching initial state.")
 
@@ -1517,28 +1517,18 @@ def main():
     app.layout = get_ui_app_layout(ui_state)
 
     def fetch_server_state_and_update_ui_state():
-        nonlocal ui_state, stub
-        seconds_passed = 0
         while True:
-            seconds_passed += 1
-            time.sleep(3)
-
-            # print("[UI] Fetching server state.")
-            state_request = pb2.TrainerCommand(
-                get_hyper_parameters=True,
-                get_interactive_layers=True,
-            )
-            # Update the interval state every 2 seconds but for data table, 
-            # update every minutes because it's slower.
-            if seconds_passed % 5 != 0:
-                continue
-
-            if seconds_passed % 60 == 0:
-                state_request.get_data_records = "train"
-            with ScopeTimer(tag="get_train_data") as t:
-                state_response = stub.ExperimentCommand(state_request)
-                ui_state.update_from_server_state(state_response)
-            print(t)
+            try:
+                for dataset in ["train", "eval"]:
+                    req = pb2.TrainerCommand(
+                        get_hyper_parameters=(dataset == "train"),
+                        get_interactive_layers=(dataset == "train"),
+                        get_data_records=dataset
+                    )
+                    state = stub.ExperimentCommand(req)
+                    ui_state.update_from_server_state(state)
+            except Exception as e:
+                print("Error updating UI state:", e)
 
     consistency_thread = threading.Thread(
         target=fetch_server_state_and_update_ui_state)

@@ -27,7 +27,7 @@ from fashion_mnist_exp import get_exp
 # from cad_models_exp import get_exp
 
 experiment = get_exp()
-experiment.set_is_training(True)
+# experiment.set_is_training(True)
 
 
 def training_thread_callback():
@@ -167,7 +167,7 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     sample_stats = pb2.SampleStatistics()
     sample_stats.origin = "train"
     sample_stats.sample_count = len(dataset.wrapped_dataset)
-    
+
     task_type = getattr(dataset, "task_type", "classification")
 
     for sample_id, row in enumerate(all_rows):
