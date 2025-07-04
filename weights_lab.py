@@ -1490,13 +1490,12 @@ def main():
     get_initial_state_request = pb2.TrainerCommand(
         get_hyper_parameters=True,
         get_interactive_layers=True,
-        # get_data_records="train",
-        # get_data_records="train",
+        get_data_records="train",
     )
 
     with ScopeTimer(tag="initial_state_fetch_and_update") as t:
-        initial_state_response = stub.ExperimentCommand(get_initial_state_request)
-        initial_state_response = stub.ExperimentCommand(get_initial_state_request)
+        initial_state_response = stub.ExperimentCommand(
+            get_initial_state_request)
     print(t)
     print("[UI] FetchED initial state.")
     ui_state.update_from_server_state(initial_state_response)
@@ -1508,14 +1507,16 @@ def main():
 
         while True:
             try:
-                for dataset in ["train", "eval"]:
-                    req = pb2.TrainerCommand(
-                        get_hyper_parameters=True,
-                        get_interactive_layers=False,
-                        get_data_records=dataset
-                    )
-                    state = stub.ExperimentCommand(req)
-                    ui_state.update_from_server_state(state)
+                req = pb2.TrainerCommand(
+                    get_hyper_parameters=True,
+                    get_interactive_layers=True,
+                    get_data_records="train")
+                state = stub.ExperimentCommand(req)
+                ui_state.update_from_server_state(state)
+
+                req = pb2.TrainerCommand(get_data_records="eval")
+                state = stub.ExperimentCommand(req)
+                ui_state.update_from_server_state(state)
             except Exception as e:
                 print("Error updating UI state:", e)
 
