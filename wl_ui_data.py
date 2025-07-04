@@ -500,7 +500,7 @@ def update_eval_data_table(_, chk, sort_info):
     if 'refresh_regularly' not in chk:
         return no_update
 
-    df = ui_state.samples_df.copy()
+    df = ui_state.eval_samples_df.copy()
     if getattr(ui_state, "task_type", "classification") == "segmentation":
         for col in ["Prediction", "Target"]:
             if col in df.columns:
