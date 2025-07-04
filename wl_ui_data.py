@@ -83,8 +83,31 @@ eval_grid_dropdown = dcc.Dropdown(
     style={'width': '6vw'}
 )
 
+def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected):
+    return html.Div([
+        html.Div([
+            html.Img(src=f'data:image/png;base64,{input_b64}', style={'width':'64px','border':'1px solid #888'}),
+            html.Div("Input", style={'fontSize':10, 'textAlign':'center'})
+        ]),
+        html.Div([
+            html.Img(src=f'data:image/png;base64,{gt_mask_b64}', style={'width':'64px','border':'1px solid green'}),
+            html.Div("Target", style={'fontSize':10, 'textAlign':'center'})
+        ]),
+        html.Div([
+            html.Img(src=f'data:image/png;base64,{pred_mask_b64}', style={'width':'64px','border':'1px solid blue'}),
+            html.Div("Prediction", style={'fontSize':10, 'textAlign':'center'})
+        ]),
+    ], style={'display':'flex', 
+              'flexDirection':'row', 
+              'gap':'4px', 
+              'marginBottom':'8px', 
+              'border': '4px solid red' if is_selected else 'none',
+              'transition': 'border 0.3s ease-in-out'
+              })
+
 
 def render_images(sample_ids, selected_ids, origin):
+    task_type = getattr(ui_state, "task_type", "classification")
     imgs = []
     try:
         batch_response = stub.GetSamples(pb2.BatchSampleRequest(
@@ -93,23 +116,31 @@ def render_images(sample_ids, selected_ids, origin):
             resize_width=256,
             resize_height=256
         ))
-
-        for sample in batch_response.samples:
-            sid = sample.sample_id
-            b64 = base64.b64encode(sample.raw_data).decode('utf-8')
-            border = '4px solid red' if sid in selected_ids else '1px solid #ccc'
-            imgs.append(html.Img(
-                src=f'data:image/png;base64,{b64}',
-                style={
-                    'width': '128px',
-                    'height': '128px',
-                    'margin': '0.1vh',
-                    'border': border,
-                    'transition': 'border 0.3s ease-in-out',
-                    'objectFit': 'contain',
-                    'imageRendering': 'auto'
-                }
-            ))
+        if task_type == "segmentation":
+            for sample in batch_response.samples:
+                sid = sample.sample_id
+                input_b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+                gt_mask_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
+                pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
+                is_selected = sid in selected_ids
+                imgs.append(render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected))
+        else:
+            for sample in batch_response.samples:
+                sid = sample.sample_id
+                b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+                border = '4px solid red' if sid in selected_ids else '1px solid #ccc'
+                imgs.append(html.Img(
+                    src=f'data:image/png;base64,{b64}',
+                    style={
+                        'width': '128px',
+                        'height': '128px',
+                        'margin': '0.1vh',
+                        'border': border,
+                        'transition': 'border 0.3s ease-in-out',
+                        'objectFit': 'contain',
+                        'imageRendering': 'auto'
+                    }
+                ))
     except Exception as e:
         print(f"[ERROR] {origin} sample rendering failed: {e}")
         return no_update
@@ -126,6 +157,18 @@ def render_images(sample_ids, selected_ids, origin):
         'paddingLeft': '0.01vw'
     })
 
+def format_for_table(val, task_type):
+    if val is None:
+        return "-"
+    if task_type == "segmentation":
+        return str(val)
+    else:
+        if isinstance(val, list):
+            try:
+                return int(val[0])
+            except Exception:
+                return str(val)
+        return str(val)
 
 def get_data_tab(ui_state: UIState):
     cols = []
@@ -427,7 +470,17 @@ def update_train_data_table(_, chk, sort_info):
     if 'refresh_regularly' not in chk:
         return no_update
 
-    df = ui_state.samples_df
+    df = ui_state.samples_df.copy()
+    if getattr(ui_state, "task_type") == "segmentation":
+        for col in ["Prediction", "Target"]:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda v: format_for_table(v, "segmentation"))
+    elif getattr(ui_state, "task_type") == "classification":
+        for col in ["Prediction", "Target"]:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda v: format_for_table(v, "classification"))
+
+
     if sort_info:
         try:
             df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
@@ -447,7 +500,16 @@ def update_eval_data_table(_, chk, sort_info):
     if 'refresh_regularly' not in chk:
         return no_update
 
-    df = ui_state.eval_samples_df
+    df = ui_state.samples_df.copy()
+    if getattr(ui_state, "task_type", "classification") == "segmentation":
+        for col in ["Prediction", "Target"]:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda v: format_for_table(v, "segmentation"))
+    elif getattr(ui_state, "task_type", "classification") == "classification":
+        for col in ["Prediction", "Target"]:
+            if col in df.columns:
+                df[col] = df[col].apply(lambda v: format_for_table(v, "classification"))
+
     if sort_info:
         try:
             df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])

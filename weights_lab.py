@@ -33,7 +33,7 @@ from dash.dependencies import Input, Output, State
 import logging
 import collections
 import numpy as np
-
+import pickle
 from collections import defaultdict
 
 from dash.dash_table.Format import Format, Scheme
@@ -64,7 +64,7 @@ _ANNOTATIONS_DF_COLUMNS = [
     "experiment_name", "model_age", "annotation", "metadata"]
 
 _SAMPLES_DF_COLUMNS = [
-    "SampleId", "Label", "Prediction", "LastLoss", "Encounters", "Discarded"
+    "SampleId", "Target", "Prediction", "LastLoss", "Encounters", "Discarded"
 ]
 
 _PLOTS_COLOR_WHEEL = [
@@ -90,9 +90,8 @@ _PLOTS_COLOR_WHEEL = [
     "#9edae5"   # Light Cyan
 ]
 
-_DISPLAY_COLUMNS = [
-    "SampleId", "Target", "PredictionRaw", "LastLoss", "Encounters", "Discarded"
-]
+_DISPLAY_COLUMNS = ["SampleId", "LastLoss", "Discarded", "Target", "Prediction"]
+
 
 _BUTTON_STYLE = {
     'width': '6vw',
@@ -125,6 +124,21 @@ def exponential_smoothing(values, alpha=0.6):
             smoothed_values.append(smoothed_val)
     return smoothed_values
 
+def display_label_or_mask(arr, task_type):
+    arr = np.array(arr, dtype=int)
+    if arr.size == 0:
+        return "-"
+    if task_type == "classification":
+        if arr.ndim == 0 or arr.size == 1:
+            return int(arr.flat[0])
+        else:
+            return int(np.argmax(arr))
+    elif task_type == "segmentation":
+        summary = f"len={arr.size}, min={arr.min()}, max={arr.max()}, sample={arr[:5].tolist()}..."
+        return summary
+    else:
+        return str(arr)
+
 @dataclass
 class PlotPoint:
     x: float | None
@@ -155,6 +169,7 @@ class UIState:
         self.samples_df = pd.DataFrame(columns=_SAMPLES_DF_COLUMNS)
         # Details about the eval data
         self.eval_samples_df = pd.DataFrame(columns=_SAMPLES_DF_COLUMNS)
+        self.task_type = 'classification'
 
 
         self.metrics_df_path = os.path.join(
@@ -516,11 +531,12 @@ class UIState:
         try:
             rows = []
             extra_keys = set()
+            self.task_type = getattr(sample_statistics, 'task_type', self.task_type)
             for record in sample_statistics.records:
                 row = {
                     "SampleId": int(record.sample_id),
-                    "Target": int(record.sample_label),            
-                    "PredictionRaw": int(record.sample_prediction), 
+                    "Target": list(record.sample_label),            
+                    "Prediction": list(record.sample_prediction), 
                     "LastLoss": float(record.sample_last_loss),
                     "Encounters": int(record.sample_encounters),
                     "Discarded": bool(record.sample_discarded),

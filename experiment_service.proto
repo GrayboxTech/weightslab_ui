@@ -177,8 +177,8 @@ message TaskField {
 
 message RecordMetadata {
   int32 sample_id = 1;
-  int32 sample_label = 2;
-  int32 sample_prediction = 3;
+  repeated int32 sample_label = 2;
+  repeated int32 sample_prediction = 3;
   float sample_last_loss = 4;
   int32 sample_encounters = 5;
   bool sample_discarded = 6;
@@ -192,6 +192,7 @@ message SampleStatistics {
   optional string origin = 6;
   optional int32 sample_count = 7;
 
+  string task_type = 9;
   map<int32, int32> sample_label = 1;
   map<int32, int32> sample_prediction = 2;
   map<int32, float> sample_last_loss = 3;
@@ -222,6 +223,8 @@ message SampleRequestResponse {
   optional bytes data = 4;
   optional string error_message = 5;
   optional bytes raw_data = 6; 
+  optional bytes mask = 7;       
+  optional bytes prediction = 8;
 }
 
 message BatchSampleRequest {
