@@ -39,6 +39,7 @@ from collections import defaultdict
 from dash.dash_table.Format import Format, Scheme
 from scope_timer import ScopeTimer
 from dataclasses import dataclass
+from math import isqrt
 
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -403,7 +404,7 @@ class UIState:
     def update_hyperparams_from_server(
             self, hyper_parameters_descs: List[pb2.HyperParameterDesc]):
         hyper_parameters_descs.sort(key=lambda x: x.name)
-
+        hidx = -1
         for hidx, hyper_parameter_desc in enumerate(hyper_parameters_descs):
             if hyper_parameter_desc.type == "number":
                 self.hyperparam.loc[hidx] = [
@@ -1313,113 +1314,447 @@ def sample_statistics_to_data_records(
 
 
 def get_data_tab(ui_state: UIState):
-    data_table_columns = []
+    cols = []
     for column in _DISPLAY_COLUMNS:
         if column == "Encounters":
             continue
-
-        data_table_column = {
-            "name": column,
-            "id": column,
-            "type": "text" if column == "Discarded" else 'any'
-        }
+        spec = {"name": column, "id": column,
+                "type": "text" if column == "Discarded" else 'any'}
         if column == "LastLoss":
-            data_table_column["format"] = Format(
-                precision=2, scheme=Scheme.fixed)
-        data_table_columns.append(data_table_column)
+            spec["format"] = Format(precision=2, scheme=Scheme.fixed)
+        cols.append(spec)
 
-    data_records = ui_state.samples_df.to_dict('records')
-    data_table = dash_table.DataTable(
+    grid_preset_dropdown = dcc.Dropdown(
+        id='grid-preset-dropdown',
+        options=[
+            {'label': str(x * x), 'value': x * x} for x in [3, 4, 5, 6]
+        ],
+        value=9,
+        clearable=False,
+        style={'width': '6vw'}
+    )
+
+    eval_grid_dropdown = dcc.Dropdown(
+        id='eval-grid-preset-dropdown',
+        options=[{'label': str(x * x), 'value': x * x} for x in [3, 4, 5, 6]],
+        value=9,
+        clearable=False,
+        style={'width': '6vw'}
+    )
+
+    train_table = dash_table.DataTable(
         id='train-data-table',
-        data=data_records,
-        columns=data_table_columns,
+        data=ui_state.samples_df.to_dict('records'),
+        columns=cols,
         sort_action="native",
         page_action="native",
+        page_size=16,
         row_selectable='multi',
         row_deletable=True,
         editable=True,
         virtualization=True,
-        # modified
-        # page_size=500,
-        page_size = 50,
         style_table={
-            "margin": "2px",
-            'padding': '2px',
-            "display": "flex",
-            'height': '25vh',
-            "overflowY": "auto", 
-            'width': '38vw',
+            'height': 'auto',
+            'overflowY': 'auto',
+            'width': '35vw',
+            'margin': '2px',
+            'padding': '2px'
         },
-        style_cell={
-            'textAlign': 'left',
-            'minWidth': '4vw',
-            'maxWidth': '4.5vw'
-        }
+        style_cell={'textAlign': 'left', 'minWidth': '4vw', 'maxWidth': '4.5vw'}
     )
-    inspect_data_sample_checkbox = dcc.Checklist(
-        id='sample-inspect-checkboxes',
-        options=[
-            {'label': 'Inspect on click', 'value': 'inspect_sample_on_click'},
-            # {'label': 'Activation maps', 'value': 'inspect_activation_maps'},
-        ],
-        value=[],
-        inline=True,
-        labelStyle={'marginRight': '5px'},
+
+    eval_table = dash_table.DataTable(
+        id='eval-data-table',
+        data=ui_state.eval_samples_df.to_dict('records'),
+        columns=cols,
+        sort_action="native",
+        page_action="native",
+        page_size=16,
+        row_selectable='multi',
+        row_deletable=True,
+        editable=True,
+        virtualization=True,
+        style_table={
+            'height': 'auto',
+            'overflowY': 'auto',
+            'width': '35vw',
+            'margin': '2px',
+            'padding': '2px'
+        },
+        style_cell={'textAlign': 'left', 'minWidth': '4vw', 'maxWidth': '4.5vw'}
     )
-    table_refrehs_checkbox = dcc.Checklist(
-        id='table-refresh-checkbox',
-        options=[
-            {'label': 'Refresh regularly', 'value': 'refresh_regularly'},
-            {'label': 'Discard by flag flip', 'value': 'discard_by_flag_flip'},
-        ],
-        value=['refresh_regularly', 'discard_by_flag_flip'],
-        inline=True,
-        labelStyle={'marginRight': '5px'},
-    )
-    table_with_query_div = html.Div(
-        id="data-panel-col0",
+
+    train_controls = html.Div([
+        dcc.Checklist(
+            id='table-refresh-checkbox',
+            options=[
+                {'label': 'Refresh regularly', 'value': 'refresh_regularly'},
+                {'label': 'Discard by flag flip', 'value': 'discard_by_flag_flip'}
+            ],
+            value=['refresh_regularly', 'discard_by_flag_flip'],
+            inline=True,
+            labelStyle={'marginRight': '5px'}
+        ),
+        dcc.Checklist(
+            id='sample-inspect-checkboxes',
+            options=[{'label': 'Inspect on click', 'value': 'inspect_sample_on_click'}],
+            value=[], inline=True,
+            labelStyle={'marginRight': '5px'}
+        ),
+        html.Div(grid_preset_dropdown, style={'marginLeft': '1vw'})
+    ], style={'display': 'flex', 'alignItems': 'center', 'gap': '1vw'})
+
+    eval_controls = html.Div([
+        dcc.Checklist(
+            id='eval-table-refresh-checkbox',
+            options=[
+                {'label': 'Refresh regularly', 'value': 'refresh_regularly'},
+                {'label': 'Discard by flag flip', 'value': 'discard_by_flag_flip'}
+            ],
+            value=['refresh_regularly', 'discard_by_flag_flip'],
+            inline=True,
+            labelStyle={'marginRight': '5px'}
+        ),
+        dcc.Checklist(
+            id='eval-sample-inspect-checkboxes',
+            options=[{'label': 'Inspect on click', 'value': 'inspect_sample_on_click'}],
+            value=[], inline=True,
+            labelStyle={'marginRight': '5px'}
+        ),
+        html.Div(eval_grid_dropdown, style={'marginLeft': '1vw'})
+    ], style={'display': 'flex', 'alignItems': 'center', 'gap': '1vw'})
+
+
+    train_query_div = dbc.Row([
+        dbc.Col(
+            dbc.Input(
+                id='train-data-query-input', type='text',
+                placeholder='Enter train data query',
+                style={'width': '18vw'}
+            ),
+        ),
+        dbc.Col(
+            dbc.Checklist(
+                id='train-query-discard-toggle',
+                options=[{'label': 'Un-discard', 'value': 'undiscard'}],
+                value=[],
+                inline=True
+            ),
+        ),
+        dbc.Col(
+            dbc.Input(
+                id='data-query-input-weight', type='number',
+                placeholder='weight',
+                style={'width': '4vw'}
+            ),
+        ),
+        dbc.Col(
+            dbc.Button(
+                "Run", id='run-train-data-query', color='primary',
+                n_clicks=0,
+                style={'width': '3vw'}
+            ),
+        ),
+    ])
+
+    eval_query_div = dbc.Row([
+        dbc.Col(
+            dbc.Input(
+                id='eval-data-query-input', type='text',
+                placeholder='Enter eval data query',
+                style={'width': '18vw'}
+            ),
+        ),
+        dbc.Col(
+            dbc.Checklist(
+                id='eval-query-discard-toggle',
+                options=[{'label': 'Un-discard', 'value': 'undiscard'}],
+                value=[],
+                inline=True
+            ),
+        ),
+        dbc.Col(
+            dbc.Input(
+                id='eval-data-query-weight', type='number',
+                placeholder='weight',
+                style={'width': '4vw'}
+            ),
+        ),
+        dbc.Col(
+            dbc.Button(
+                "Run", id='run-eval-data-query', color='primary',
+                n_clicks=0,
+                style={'width': '3vw'}
+            ),
+        ),
+    ])
+
+    tabs = dcc.Tabs(
+        id='data-tabs',
+        value='train',
         children=[
-            html.H2("Train Dataset"),
-            table_refrehs_checkbox,
-            inspect_data_sample_checkbox,
-            data_table,
-            get_data_query_input_div(ui_state),
+            dcc.Tab(label='Train Dataset', value='train', children=[
+                html.Div([
+                    html.H2("Train Dataset"),
+                    train_controls,
+                    html.Div([
+                        html.Div([train_table], style={
+                            'flex': '0 0 35vw', 
+                            'minWidth': '35vw'
+                        }),
+                        html.Div([
+                            html.Div(id='train-sample-panel')
+                        ], style={
+                            'flex': '1', 
+                            'minWidth': '400px', 
+                            'height': 'auto',  
+                            'display': 'flex',
+                            'overflow': 'auto',
+                            'alignItems': 'flex-start',
+                            'justifyContent': 'center'
+                        })
+                    ], style={
+                        'display': 'flex', 
+                        'gap': '1vw',
+                        'width': '100%'
+                    }),
+                    train_query_div
+                ])
+
+            ]),
+            dcc.Tab(label='Eval Dataset', value='eval', children=[
+                html.Div([
+                    html.H2("Eval Dataset"),
+                    eval_controls,
+                    html.Div([
+                        html.Div([eval_table], style={
+                            'flex': '0 0 35vw',  
+                            'minWidth': '35vw'
+                        }),
+                        html.Div([
+                            html.Div(id='eval-sample-panel')
+                        ], style={
+                            'flex': '1', 
+                            'minWidth': '400px', 
+                            'height': 'auto', 
+                            'overflow': 'auto', 
+                            'display': 'flex',
+                            'alignItems': 'flex-start',
+                            'justifyContent': 'center'
+                        })
+                    ], style={
+                        'display': 'flex', 
+                        'gap': '1vw',
+                        'width': '100%'
+                    }),
+                    eval_query_div
+                ])
+
+            ])
         ]
     )
-    image_inspect_div = html.Div(
-        id="data-panel-col1",
-        children=[],
-        # className="d-flex justify-content-center align-items-center",
-        style={
-            "display": "flex",
-            "justifyContent": "center",
-            "alignItems": "center",
-        }
-    )
-    width_percent = 43
 
-    return html.Div(    
-        id='train-data-div',
-        children=[
-            dbc.Row(
-                id="data-panel-row",
-                children=[
-                    dbc.Col(table_with_query_div),
-                    dbc.Col(image_inspect_div)
-                ],
-            )
-        ],
-        style={
-            'aling': 'center',
-            'margin': '4vw',
-            'padding': '2vw',
-            'borderRadius': '15px',
-            'border': '2px solid #666',
-            'boxShadow': '0 4px 8px rgba(0,0,0,0.1)',
-            'width': f'{width_percent}vw',
-            'maxWdith': f'{width_percent+2}vw',
-        }
-    )
+    return html.Div(tabs, style={
+        'margin': '4vw', 'padding': '2vw',
+        'borderRadius': '15px', 'border': '2px solid #666',
+        'boxShadow': '0 4px 8px rgba(0,0,0,0.1)',
+        'width': '87vw'
+    })
+
+# def get_data_tab(ui_state: UIState):
+#     data_table_columns = []
+#     for column in _DISPLAY_COLUMNS:
+#         if column == "Encounters":
+#             continue
+
+#         data_table_column = {
+#             "name": column,
+#             "id": column,
+#             "type": "text" if column == "Discarded" else 'any'
+#         }
+#         if column == "LastLoss":
+#             data_table_column["format"] = Format(
+#                 precision=2, scheme=Scheme.fixed)
+#         data_table_columns.append(data_table_column)
+
+#     data_records = ui_state.samples_df.to_dict('records')
+#     data_table = dash_table.DataTable(
+#         id='train-data-table',
+#         data=data_records,
+#         columns=data_table_columns,
+#         sort_action="native",
+#         page_action="native",
+#         row_selectable='multi',
+#         row_deletable=True,
+#         editable=True,
+#         virtualization=True,
+#         # modified
+#         # page_size=500,
+#         page_size = 50,
+#         style_table={
+#             "margin": "2px",
+#             'padding': '2px',
+#             "display": "flex",
+#             'height': '25vh',
+#             "overflowY": "auto", 
+#             'width': '38vw',
+#         },
+#         style_cell={
+#             'textAlign': 'left',
+#             'minWidth': '4vw',
+#             'maxWidth': '4.5vw'
+#         }
+#     )
+#     inspect_data_sample_checkbox = dcc.Checklist(
+#         id='sample-inspect-checkboxes',
+#         options=[
+#             {'label': 'Inspect on click', 'value': 'inspect_sample_on_click'},
+#             # {'label': 'Activation maps', 'value': 'inspect_activation_maps'},
+#         ],
+#         value=[],
+#         inline=True,
+#         labelStyle={'marginRight': '5px'},
+#     )
+#     table_refrehs_checkbox = dcc.Checklist(
+#         id='table-refresh-checkbox',
+#         options=[
+#             {'label': 'Refresh regularly', 'value': 'refresh_regularly'},
+#             {'label': 'Discard by flag flip', 'value': 'discard_by_flag_flip'},
+#         ],
+#         value=['refresh_regularly', 'discard_by_flag_flip'],
+#         inline=True,
+#         labelStyle={'marginRight': '5px'},
+#     )
+#     table_with_query_div = html.Div(
+#         id="data-panel-col0",
+#         children=[
+#             html.H2("Train Dataset"),
+#             table_refrehs_checkbox,
+#             inspect_data_sample_checkbox,
+#             data_table,
+#             get_data_query_input_div(ui_state),
+#         ]
+#     )
+#     image_inspect_div = html.Div(
+#         id="data-panel-col1",
+#         children=[],
+#         # className="d-flex justify-content-center align-items-center",
+#         style={
+#             "display": "flex",
+#             "justifyContent": "center",
+#             "alignItems": "center",
+#         }
+#     )
+#     width_percent = 43
+
+#     return html.Div(    
+#         id='train-data-div',
+#         children=[
+#             dbc.Row(
+#                 id="data-panel-row",
+#                 children=[
+#                     dbc.Col(table_with_query_div),
+#                     dbc.Col(image_inspect_div)
+#                 ],
+#             )
+#         ],
+#         style={
+#             'aling': 'center',
+#             'margin': '4vw',
+#             'padding': '2vw',
+#             'borderRadius': '15px',
+#             'border': '2px solid #666',
+#             'boxShadow': '0 4px 8px rgba(0,0,0,0.1)',
+#             'width': f'{width_percent}vw',
+#             'maxWdith': f'{width_percent+2}vw',
+#         }
+#     )
+
+def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected):
+    return html.Div([
+        html.Div([
+            html.Img(src=f'data:image/png;base64,{input_b64}', style={'width':'64px','border':'1px solid #888'}),
+            html.Div("Input", style={'fontSize':10, 'textAlign':'center'})
+        ]),
+        html.Div([
+            html.Img(src=f'data:image/png;base64,{gt_mask_b64}', style={'width':'64px','border':'1px solid green'}),
+            html.Div("Target", style={'fontSize':10, 'textAlign':'center'})
+        ]),
+        html.Div([
+            html.Img(src=f'data:image/png;base64,{pred_mask_b64}', style={'width':'64px','border':'1px solid blue'}),
+            html.Div("Prediction", style={'fontSize':10, 'textAlign':'center'})
+        ]),
+    ], style={'display':'flex', 
+              'flexDirection':'row', 
+              'gap':'4px', 
+              'marginBottom':'8px', 
+              'border': '4px solid red' if is_selected else 'none',
+              'transition': 'border 0.3s ease-in-out'
+              })
+
+def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin):
+    task_type = getattr(ui_state, "task_type", "classification")
+    imgs = []
+    try:
+        batch_response = stub.GetSamples(pb2.BatchSampleRequest(
+            sample_ids=sample_ids,
+            origin=origin,
+            resize_width=256,
+            resize_height=256
+        ))
+        if task_type == "segmentation":
+            for sample in batch_response.samples:
+                sid = sample.sample_id
+                input_b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+                gt_mask_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
+                pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
+                is_selected = sid in selected_ids
+                imgs.append(render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected))
+        else:
+            for sample in batch_response.samples:
+                sid = sample.sample_id
+                b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+                border = '4px solid red' if sid in selected_ids else '1px solid #ccc'
+                imgs.append(html.Img(
+                    src=f'data:image/png;base64,{b64}',
+                    style={
+                        'width': '128px',
+                        'height': '128px',
+                        'margin': '0.1vh',
+                        'border': border,
+                        'transition': 'border 0.3s ease-in-out',
+                        'objectFit': 'contain',
+                        'imageRendering': 'auto'
+                    }
+                ))
+    except Exception as e:
+        print(f"[ERROR] {origin} sample rendering failed: {e}")
+        return no_update
+
+    cols = isqrt(len(sample_ids)) or 1
+    return html.Div(children=imgs, style={
+        'display': 'grid',
+        'gridTemplateColumns': f'repeat({cols}, 1fr)',
+        'columnGap': '0.1vw',
+        'rowGap': '0.1vh',
+        'width': 'auto',
+        'justifyItems': 'center',
+        'alignItems': 'center',
+        'paddingLeft': '0.01vw'
+    })
+
+def format_for_table(val, task_type):
+    if val is None:
+        return "-"
+    if task_type == "segmentation":
+        return str(val)
+    else:
+        if isinstance(val, list):
+            try:
+                return int(val[0])
+            except Exception:
+                return str(val)
+        return str(val)
 
 
 def get_ui_app_layout(ui_state: UIState) -> html.Div:
@@ -1939,35 +2274,85 @@ def main():
 
         return style
 
+    # @app.callback(
+    #     Output('data-panel-col1', 'children', allow_duplicate=True),
+    #     Input('train-data-table', 'selected_rows'),
+    #     State('train-data-table', 'data'),
+    #     State('sample-inspect-checkboxes', 'value'),
+    # )
+    # def render_data_sample(selected_rows, data, inspect_checkboxes):
+    #     if selected_rows is None or len(selected_rows) == 0 or \
+    #             len(inspect_checkboxes) == 0:
+    #         return []
+
+    #     # Get the selected row's data
+    #     selected_row_index = selected_rows[-1]
+    #     row = data[selected_row_index]
+    #     selected_sample_id = row["SampleId"]
+    #     request = pb2.SampleRequest(
+    #         sample_id=selected_sample_id, origin="train")
+    #     response = stub.GetSample(request)
+
+    #     image_base64 = base64.b64encode(response.data).decode('utf-8')
+
+    #     return html.Img(
+    #         src=f'data:image/png;base64,{image_base64}',
+    #         style={
+    #             'width': '18vw',
+    #             'height': '18vh',
+    #             'marginTop': '10vh',
+    #         }
+    #     )
+
     @app.callback(
-        Output('data-panel-col1', 'children', allow_duplicate=True),
-        Input('train-data-table', 'selected_rows'),
-        State('train-data-table', 'data'),
-        State('sample-inspect-checkboxes', 'value'),
+        Output('train-data-table', 'page_size'),
+        Input('grid-preset-dropdown', 'value')
     )
-    def render_data_sample(selected_rows, data, inspect_checkboxes):
-        if selected_rows is None or len(selected_rows) == 0 or \
-                len(inspect_checkboxes) == 0:
-            return []
+    def update_page_size(grid_count):
+        return grid_count
 
-        # Get the selected row's data
-        selected_row_index = selected_rows[-1]
-        row = data[selected_row_index]
-        selected_sample_id = row["SampleId"]
-        request = pb2.SampleRequest(
-            sample_id=selected_sample_id, origin="train")
-        response = stub.GetSample(request)
+    @app.callback(
+        Output('eval-data-table', 'page_size'),
+        Input('eval-grid-preset-dropdown', 'value')
+    )
+    def update_eval_page_size(grid_count):
+        return grid_count
 
-        image_base64 = base64.b64encode(response.data).decode('utf-8')
 
-        return html.Img(
-            src=f'data:image/png;base64,{image_base64}',
-            style={
-                'width': '18vw',
-                'height': '18vh',
-                'marginTop': '10vh',
-            }
-        )
+    @app.callback(
+        Output('train-sample-panel', 'children', allow_duplicate=True),
+        Output('eval-sample-panel', 'children', allow_duplicate=True),
+        Input('train-data-table', 'derived_viewport_data'),
+        Input('train-data-table', 'selected_rows'),
+        Input('eval-data-table', 'derived_viewport_data'),
+        Input('eval-data-table', 'selected_rows'),
+        Input('sample-inspect-checkboxes', 'value'),
+        Input('eval-sample-inspect-checkboxes', 'value'),
+        Input('data-tabs', 'value'),
+        prevent_initial_call=True
+    )
+    def render_samples(
+        train_viewport, train_selected_rows,
+        eval_viewport, eval_selected_rows,
+        train_flags, eval_flags,
+        tab
+    ):
+        panels = [no_update, no_update]
+        nonlocal ui_state, stub
+        if tab == 'train' and 'inspect_sample_on_click' in train_flags and train_viewport:
+            df = ui_state.samples_df
+            ids = [row['SampleId'] for row in train_viewport if row['SampleId'] in df['SampleId'].values]
+            selected_ids = set(df.iloc[i]['SampleId'] for i in train_selected_rows or [])
+            panels[0] = render_images(ui_state, stub, ids, selected_ids, origin='train')
+
+        elif tab == 'eval' and 'inspect_sample_on_click' in eval_flags and eval_viewport:
+            df = ui_state.eval_samples_df
+            ids = [row['SampleId'] for row in eval_viewport if row['SampleId'] in df['SampleId'].values]
+            selected_ids = set(df.iloc[i]['SampleId'] for i in eval_selected_rows or [])
+            panels[1] = render_images(ui_state, stub, ids, selected_ids, origin='eval')
+
+        return panels
+
 
     @app.callback(
         Output('train-data-table', 'data', allow_duplicate=True),
