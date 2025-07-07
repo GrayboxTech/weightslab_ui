@@ -63,7 +63,7 @@ _ANNOTATIONS_DF_COLUMNS = [
     "experiment_name", "model_age", "annotation", "metadata"]
 
 _SAMPLES_DF_COLUMNS = [
-    "SampleId", "Label", "Prediction", "LastLoss", "Encounters", "Discarded"
+    "SampleId", "Target", "Prediction", "LastLoss", "Encounters", "Discarded" 
 ]
 
 _PLOTS_COLOR_WHEEL = [
@@ -90,7 +90,7 @@ _PLOTS_COLOR_WHEEL = [
 ]
 
 _DISPLAY_COLUMNS = [
-    "SampleId", "Target", "PredictionRaw", "LastLoss", "Encounters", "Discarded"
+    "SampleId", "Target", "PredictionRaw", "LastLoss", "Discarded"
 ]
 
 _BUTTON_STYLE = {
@@ -242,6 +242,7 @@ class UIState:
         self.samples_df = pd.DataFrame(columns=_SAMPLES_DF_COLUMNS)
         # Details about the eval data
         self.eval_samples_df = pd.DataFrame(columns=_SAMPLES_DF_COLUMNS)
+        self.task_type = 'classification'
 
 
         self.metrics_df_path = os.path.join(
@@ -536,7 +537,7 @@ class UIState:
             self.met_names.add(status.metrics_status.name)
 
             if status.experiment_name not in self.exp_name_2_color:
-                self.exp_name_2_color[not status.experiment_name] = \
+                self.exp_name_2_color[status.experiment_name] = \
                     _PLOTS_COLOR_WHEEL[ \
                         len(self.exp_names) % len(_PLOTS_COLOR_WHEEL)]
         elif status.HasField("annotat_status"):
@@ -573,11 +574,12 @@ class UIState:
         try:
             rows = []
             extra_keys = set()
+            self.task_type = getattr(sample_statistics, 'task_type', self.task_type)
             for record in sample_statistics.records:
                 row = {
                     "SampleId": int(record.sample_id),
-                    "Target": int(record.sample_label),            
-                    "PredictionRaw": int(record.sample_prediction), 
+                    "Target": list(record.sample_label),            
+                    "Prediction": list(record.sample_prediction), 
                     "LastLoss": float(record.sample_last_loss),
                     "Encounters": int(record.sample_encounters),
                     "Discarded": bool(record.sample_discarded),
@@ -1356,7 +1358,7 @@ def get_data_tab(ui_state: UIState):
         style_table={
             'height': 'auto',
             'overflowY': 'auto',
-            'width': '35vw',
+            'width': 'auto',
             'margin': '2px',
             'padding': '2px'
         },
@@ -1377,7 +1379,7 @@ def get_data_tab(ui_state: UIState):
         style_table={
             'height': 'auto',
             'overflowY': 'auto',
-            'width': '35vw',
+            'width': 'auto',
             'margin': '2px',
             'padding': '2px'
         },

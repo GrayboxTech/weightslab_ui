@@ -177,8 +177,8 @@ message TaskField {
 
 message RecordMetadata {
   int32 sample_id = 1;
-  int32 sample_label = 2;
-  int32 sample_prediction = 3;
+  repeated int32 sample_label = 2;
+  repeated int32 sample_prediction = 3;
   float sample_last_loss = 4;
   int32 sample_encounters = 5;
   bool sample_discarded = 6;

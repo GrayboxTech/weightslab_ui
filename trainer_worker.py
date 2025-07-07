@@ -8,12 +8,12 @@ from concurrent import futures
 from threading import Thread
 from PIL import Image
 from typing import List, Tuple, Iterable
-
+from weightslab.experiment import ArchitectureOpType
+import torch
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 from collections import defaultdict
-import pickle
-
+from torchvision import transforms
 from scope_timer import ScopeTimer
 
 from fashion_mnist_exp import get_exp
@@ -159,67 +159,71 @@ def make_task_field(name, value):
         raise ValueError(f"Unsupported value type for TaskField: {name}: {type(value)}")
 
 
+def mask_to_png_bytes(mask, num_classes=21):
+    if isinstance(mask, torch.Tensor):
+        mask = mask.detach().cpu().numpy()
+    if not isinstance(mask, np.ndarray):
+        mask = np.array(mask)
+    mask = np.squeeze(mask)
+    if mask.ndim == 1:
+        sz = int(np.sqrt(mask.size))
+        if sz * sz == mask.size:
+            mask = mask.reshape((sz, sz))
+        else:
+            raise ValueError(f"Cannot reshape mask of size {mask.size} to square.")
+    if mask.ndim != 2:
+        raise ValueError(f"Expected mask 2D, got shape {mask.shape}")
+
+    mask = (mask.astype(np.float32) * (255.0 / (num_classes - 1))).astype(np.uint8)
+
+    im = Image.fromarray(mask)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     # print("[BACKEND].get_data_set_representation")
 
     all_rows = list(dataset.as_records())
 
     sample_stats = pb2.SampleStatistics()
-    sample_stats.origin = "train"
     sample_stats.sample_count = len(dataset.wrapped_dataset)
-
-    task_type = getattr(dataset, "task_type", "classification")
+    task_type = getattr(experiment, "task_type", "classification")
+    sample_stats.task_type = task_type
 
     for sample_id, row in enumerate(all_rows):
-        label = row.get("label") or row.get("target")
-        prediction_raw = row.get("prediction_raw", None)
+        target = row.get("label", row.get("target", -1))
+        pred = row.get("prediction_raw", -1)
 
-        mask_preview = None
-        if task_type == "segmentation" and prediction_raw is not None:
-            if hasattr(prediction_raw, "cpu"):
-                arr = prediction_raw.cpu().numpy()
+        if task_type == "classification":
+            target_list = [int(target)] if not isinstance(target, (list, np.ndarray)) else [int(np.array(target).item())]
+            pred_list = [int(pred)] if not isinstance(pred, (list, np.ndarray)) else [int(np.array(pred).item())]
+        elif task_type == "segmentation":
+            if hasattr(target, 'cpu'):  
+                target_arr = target.cpu().numpy()
             else:
-                arr = np.array(prediction_raw)
-            if arr.ndim == 3 and arr.shape[0] == 1:  # (1, H, W)
-                arr = arr.squeeze(0)
-            try:
-                from PIL import Image
-                img = Image.fromarray(arr.astype(np.uint8))
-                buf = io.BytesIO()
-                img.save(buf, format='PNG')
-                mask_preview = buf.getvalue()
-            except Exception as e:
-                print(f"Could not generate mask preview: {e}")
+                target_arr = np.array(target)
+            if hasattr(pred, 'cpu'):
+                pred_arr = pred.cpu().numpy()
+            else:
+                pred_arr = np.array(pred)
+            target_classes = np.unique(target_arr)
+            pred_classes = np.unique(pred_arr)
+            target_list = [int(x) for x in target_classes]
+            pred_list = [int(x) for x in pred_classes]
 
-        prediction_raw_bytes = None
-        if prediction_raw is not None:
-            try:
-                prediction_raw_bytes = pickle.dumps(prediction_raw)
-            except Exception as e:
-                print(f"Could not serialize prediction_raw: {e}")
-
+        else:
+            target_list = [int(target)] if not isinstance(target, (list, np.ndarray)) else [int(np.array(target).item())]
+            pred_list = [int(pred)] if not isinstance(pred, (list, np.ndarray)) else [int(np.array(pred).item())]
         record = pb2.RecordMetadata(
-            sample_id = row.get('sample_id', sample_id),
-            sample_label = int(label) if label is not None else -1,
-            sample_last_loss = row.get('prediction_loss', -1),
-            sample_encounters = row.get('encountered', row.get('exposure_amount', 0)),
-            sample_discarded = row.get('deny_listed', False),
-            mask_preview = mask_preview if mask_preview is not None else b"",
-            prediction_raw = prediction_raw_bytes if prediction_raw_bytes is not None else b"",
-            task_type = task_type,
+            sample_id=row.get('sample_id', sample_id),
+            sample_label=target_list,
+            sample_prediction=pred_list,
+            sample_last_loss=float(row.get('prediction_loss', -1)),
+            sample_encounters=int(row.get('encountered', row.get('exposure_amount', 0))),
+            sample_discarded=bool(row.get('deny_listed', False)),
         )
-
-        core_fields = {
-            'label', 'target', 'prediction_raw', 'prediction_loss', 'exposure_amount',
-            'deny_listed', 'sample_id', 'encountered'
-        }
-        for k, v in row.items():
-            if k not in core_fields:
-                try:
-                    record.extra_fields.append(make_task_field(k, v))
-                except Exception as e:
-                    print(f"[EXTRA FIELD ERROR] Could not add extra field '{k}': {e}")
-
         sample_stats.records.append(record)
 
     return sample_stats
@@ -238,13 +242,18 @@ def tensor_to_bytes(tensor):
 
     img = Image.fromarray(np_img, mode=mode)
     buf = io.BytesIO()
-    img.save(buf, format='png')
+    # img.save(buf, format='png')
+    img.save(buf, format='jpeg', quality=85)
     return buf.getvalue()
 
 def load_raw_image(dataset, index):
-    wrapped = dataset.wrapped_dataset if hasattr(dataset, "wrapped_dataset") else dataset
 
-    if hasattr(wrapped, "data"):
+    wrapped = getattr(dataset, "wrapped_dataset", dataset)
+    if hasattr(wrapped, "images") and isinstance(wrapped.images, list):
+        img_path = wrapped.images[index]
+        img = Image.open(img_path)
+        return img.convert("RGB")
+    elif hasattr(wrapped, "data"):
         np_img = wrapped.data[index]
         if hasattr(np_img, 'numpy'):
             np_img = np_img.numpy()  
@@ -272,8 +281,9 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         global experiment
         while True:
             log = experiment.logger.queue.get()
-            if "metric_name" in log:
-                print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
+            if "metric_name" in log and "acc" in log["metric_name"]:
+                # print(f"[LOG] {log['metric_name']} = {log['metric_value']:.2f}")
+                pass
 
             if log is None:
                 break
@@ -422,7 +432,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         try:
             pil_img = load_raw_image(dataset, request.sample_id)
             buf = io.BytesIO()
-            pil_img.save(buf, format='PNG')
+            # pil_img.save(buf, format='PNG')
+            pil_img.save(buf, format='jpeg', quality=85)
             raw_image_bytes = buf.getvalue()
         except Exception as e:
             return pb2.SampleRequestResponse(error_message=str(e))
@@ -441,19 +452,60 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
         response = pb2.BatchSampleResponse()
 
+        do_resize = request.HasField("resize_width") and request.HasField("resize_height")
+        resize_dims = (request.resize_width, request.resize_height) if do_resize else None
+        task_type = getattr(dataset, "task_type", getattr(experiment, "task_type", "classification"))
+
         for sid in request.sample_ids:
             try:
-                tensor, _, label = dataset._getitem_raw(sid)
-                transformed = tensor_to_bytes(tensor)
-                raw = load_raw_image(dataset, sid)
+                if hasattr(dataset, "_getitem_raw"):
+                    tensor, idx, label = dataset._getitem_raw(sid)
+                else:
+                    tensor, idx, label = dataset[sid]
+
+                if isinstance(tensor, torch.Tensor):
+                    img = tensor.detach().cpu()
+                else:
+                    img = torch.tensor(tensor)
+                if img.ndim == 3:
+                    pil_img = transforms.ToPILImage()(img)
+                elif img.ndim == 2:
+                    pil_img = Image.fromarray((img.numpy() * 255).astype(np.uint8))
+                else:
+                    raise ValueError("Unknown image shape.")
+
+                if resize_dims:
+                    pil_img = pil_img.resize(resize_dims, Image.BILINEAR)
                 buf = io.BytesIO()
-                raw.save(buf, format="PNG")
+                pil_img.save(buf, format='PNG')
+                transformed_bytes = buf.getvalue()
+
+                try:
+                    raw = load_raw_image(dataset, sid)
+                    if resize_dims:
+                        raw = raw.resize(resize_dims, Image.BILINEAR)
+                    raw_buf = io.BytesIO()
+                    raw.save(raw_buf, format='PNG')
+                    raw_bytes = raw_buf.getvalue()
+                except Exception:
+                    raw_bytes = transformed_bytes 
+
+                mask_bytes = b""
+                pred_bytes = b""
+
+                if task_type == "segmentation":
+                    mask_bytes = mask_to_png_bytes(label)
+                    pred_mask = dataset.get_prediction_mask(sid)
+                    pred_bytes = mask_to_png_bytes(pred_mask)
+
+
                 sample_response = pb2.SampleRequestResponse(
                     sample_id=sid,
-                    origin=request.origin,
-                    label=label,
-                    data=transformed,
-                    raw_data=buf.getvalue()
+                    label=int(label) if task_type == "classification" else -1,  # not used for segmentation
+                    data=transformed_bytes,
+                    raw_data=raw_bytes,
+                    mask=mask_bytes,
+                    prediction=pred_bytes,
                 )
                 response.samples.append(sample_response)
             except Exception as e:
@@ -475,7 +527,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     neuron_id.neuron_id)
 
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
-                experiment.model.prune(
+                experiment.apply_architecture_op(
+                    op_type = ArchitectureOpType.PRUNE,
                     layer_id=layer_id,
                     neuron_indices=set(neuron_ids))
 
@@ -483,7 +536,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 success=True,
                 message=f"Pruned {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.ADD_NEURONS:
-            experiment.model.add_neurons(
+            experiment.apply_architecture_op(
+                op_type = ArchitectureOpType.ADD_NEURONS,
                 layer_id=weight_operations.layer_id,
                 neuron_count=weight_operations.neurons_to_add)
             answer = pb2.WeightsOperationResponse(
@@ -498,7 +552,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 layer_id_to_neuron_ids_list[layer_id].append(
                     neuron_id.neuron_id)
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
-                experiment.model.freeze(
+                experiment.apply_architecture_op(
+                    op_type = ArchitectureOpType.FREEZE,
                     layer_id=layer_id,
                     neuron_ids=neuron_ids)
             answer = pb2.WeightsOperationResponse(
@@ -506,7 +561,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 message=f"Frozen {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.REINITIALIZE:
             for neuron_id in weight_operations.neuron_ids:
-                experiment.model.reinit_neurons(
+                experiment.apply_architecture_op(
+                    op_type = ArchitectureOpType.REINITIALIZE,
                     layer_id=neuron_id.layer_id,
                     neuron_indices={neuron_id.neuron_id})
 
