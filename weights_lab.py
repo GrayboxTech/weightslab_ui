@@ -296,7 +296,7 @@ class UIState:
 
     def get_neurons_df(self):
         with self.lock:
-            return self.neurons_df
+            return self.neurons_df.copy()
 
     def get_layers_df(self):
         with self.lock:
@@ -487,6 +487,8 @@ class UIState:
         """
             Update the neurons dataframe with the new neurons details.
         """
+        if not layer_representations:
+            return
         neuron_row_idx = 0
         neurons_df = pd.DataFrame(columns=_NEURONS_DF_COLUMNS)
         layers_df = pd.DataFrame(columns=_LAYER_DF_COLUMNS)
@@ -2753,7 +2755,7 @@ def main():
 
         return figure
 
-    app.run(debug=False, port=8050, threaded=False, processes=1)
+    app.run(debug=False,port=8050)
 
 if __name__ == '__main__':
     main()
