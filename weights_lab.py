@@ -43,8 +43,6 @@ from math import isqrt
 
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
-lock = threading.Lock()
-
 
 _HYPERPARAM_COLUMNS = ["label", "type", "name", "value"]
 
@@ -262,8 +260,8 @@ class UIState:
         self.neuron_id_to_df_row_idx = {}  # (layer_id, neuron_id) -> idx
 
         self.selected_neurons = defaultdict(lambda: [])  # layer_id -> List[neuron_id]
-        self.lock = threading.Lock()
-        self.metrics_lock = threading.Lock()
+        self.lock = threading.RLock()
+        self.metrics_lock = threading.RLock()
 
         # Cache plots for faster rendering
         self.exp_name_2_color = defaultdict(lambda: "blue")
@@ -1910,14 +1908,15 @@ def main():
                 print("Error updating UI state:", e)
 
     consistency_thread = threading.Thread(
-        target=fetch_server_state_and_update_ui_state)
+        target=fetch_server_state_and_update_ui_state, daemon=True)
     consistency_thread.start()
 
     def retrieve_training_statuses():
         nonlocal ui_state, stub
         for status in stub.StreamStatus(pb2.Empty()):
             ui_state.update_metrics_from_server(status)
-    status_thread = threading.Thread(target=retrieve_training_statuses)
+    status_thread = threading.Thread(
+        target=retrieve_training_statuses, daemon=True)
     status_thread.start()
 
     @app.callback(
@@ -2197,19 +2196,21 @@ def main():
         State('neuron-action-dropdown', "value"),
     )
     def run_query_on_neurons(_, query, weight, action):
-        print(f"[UI] WeightsLab.run_query_on_neurons {query}, {weight}, {action}")
         nonlocal ui_state
+        print(
+            f"[UI] WeightsLab.run_query_on_neurons {query}, {weight}, "
+            f"{action} {ui_state.get_neurons_df()}")
         if weight is None:
             weight = 1.0
 
         selected_neurons = collections.defaultdict(lambda: [])
         try:
-            selected_neurons_df = ui_state.neurons_df.query(query)
+            selected_neurons_df = ui_state.get_neurons_df().query(query)
         except Exception as e:
-            print(f"Error: {e} ", ui_state.neurons_df)
+            print(f"Error: {e} ", ui_state.get_neurons_df())
             return
 
-        # print("Selected neurons:", selected_neurons_df)
+        print("Selected neurons:", selected_neurons_df)
         sample_params = {}
         if weight <= 1.0:
             sample_params["frac"] = weight
@@ -2311,7 +2312,6 @@ def main():
                 print(f"[ERROR] Failed to sort eval data: {e}")
         return df.to_dict('records')
 
-            
     @app.callback(
         Input('run-train-data-query', 'n_clicks'),
         Input('run-eval-data-query', 'n_clicks'),
@@ -2599,7 +2599,7 @@ def main():
         State("experiment_plots_div", "children")
     )
     def add_graphs_to_div(_, existing_children):
-        print(f"UI.add_graphs_to_div")
+        # print(f"UI.add_graphs_to_div")
         nonlocal ui_state
 
         graph_names = sorted(ui_state.met_names)
@@ -2753,7 +2753,7 @@ def main():
 
         return figure
 
-    app.run(debug=False, port=8050)
+    app.run(debug=False, port=8050, threaded=False, processes=1)
 
 if __name__ == '__main__':
     main()

@@ -35,7 +35,7 @@ def training_thread_callback():
         # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
-            print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
+            # print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
 
 
 training_thread = Thread(target=training_thread_callback)
