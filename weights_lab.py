@@ -3,7 +3,7 @@ import dash
 from dash import dcc
 from dash import html
 from enum import Enum
-
+import re
 from dash import dcc, html
 from dash import dash_table
 from dash.dependencies import Input
@@ -1745,6 +1745,23 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin):
         'paddingLeft': '0.01vw'
     })
 
+def parse_sort_info(query):
+    if not query or 'sortby' not in query.lower():
+        return None
+    match = re.search(r'sortby\s+([a-zA-Z0-9_, \s]+)', query, re.IGNORECASE)
+    if not match:
+        return None
+    cols, dirs = [], []
+    for part in match.group(1).split(','):
+        tokens = part.strip().split()
+        if not tokens:
+            continue
+        col = tokens[0]
+        direction = tokens[1].lower() if len(tokens) > 1 and tokens[1].lower() in ['asc', 'desc'] else 'asc'
+        cols.append(col)
+        dirs.append(direction == 'asc')
+    return {'cols': cols, 'dirs': dirs} if cols else None
+
 def format_for_table(val, task_type):
     if val is None:
         return "-"
@@ -2212,48 +2229,162 @@ def main():
     @app.callback(
         Output('train-data-table', 'data'),
         Input('datatbl-render-freq', 'n_intervals'),
+        Input('run-train-data-query', 'n_clicks'),
         State('table-refresh-checkbox', 'value'),
+        State('train-data-query-input', 'value'),
     )
-    def update_train_data_table(_, refresh_checkbox):
-        print("[UI] WeightsLab.update_train_data_table")
-        nonlocal ui_state
-        if "refresh_regularly" not in refresh_checkbox:
+    def update_train_data_table(_, __, chk, query):
+        if 'refresh_regularly' not in chk:
             return no_update
-        return ui_state.samples_df.to_dict('records')
 
+        df = ui_state.samples_df.copy()
+        if getattr(ui_state, "task_type") == "segmentation":
+            for col in ["Prediction", "Target"]:
+                if col in df.columns:
+                    df[col] = df[col].apply(lambda v: format_for_table(v, "segmentation"))
+        elif getattr(ui_state, "task_type") == "classification":
+            for col in ["Prediction", "Target"]:
+                if col in df.columns:
+                    df[col] = df[col].apply(lambda v: format_for_table(v, "classification"))
+
+        sort_info = parse_sort_info(query)
+        if sort_info:
+            try:
+                df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
+            except Exception as e:
+                print(f"[ERROR] Failed to sort train data: {e}")
+        return df.to_dict('records')
+
+
+
+    @app.callback(
+        Output('eval-data-table', 'data'),
+        Input('datatbl-render-freq', 'n_intervals'),
+        Input('run-eval-data-query', 'n_clicks'),
+        State('eval-table-refresh-checkbox', 'value'),
+        State('eval-data-query-input', 'value'),
+    )
+    def update_eval_data_table(_, __, chk, query):
+        if 'refresh_regularly' not in chk:
+            return no_update
+
+        df = ui_state.eval_samples_df.copy()
+        if getattr(ui_state, "task_type", "classification") == "segmentation":
+            for col in ["Prediction", "Target"]:
+                if col in df.columns:
+                    df[col] = df[col].apply(lambda v: format_for_table(v, "segmentation"))
+        elif getattr(ui_state, "task_type", "classification") == "classification":
+            for col in ["Prediction", "Target"]:
+                if col in df.columns:
+                    df[col] = df[col].apply(lambda v: format_for_table(v, "classification"))
+
+        sort_info = parse_sort_info(query)
+        if sort_info:
+            try:
+                df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
+            except Exception as e:
+                print(f"[ERROR] Failed to sort eval data: {e}")
+        return df.to_dict('records')
+
+        
     @app.callback(
         Input('run-train-data-query', 'n_clicks'),
         State('train-data-query-input', 'value'),
         State('data-query-input-weight', 'value'),
+        State('train-query-discard-toggle', 'value'),
+        prevent_initial_call=True
     )
-    def run_query_on_dataset(_, query, weight):
-        nonlocal ui_state
+    def run_query_on_dataset(_, query, weight, toggle_values):
+        if 'sortby' in query.lower():
+            return no_update
+        
+        if weight is None:
+            weight = 1.0
+        un_discard = 'undiscard' in toggle_values
+
+        try:
+            query_dataframe = ui_state.samples_df.query(query)
+
+            if weight <= 1.0:
+                query_dataframe = query_dataframe.sample(frac=weight)
+            elif isinstance(weight, int):
+                query_dataframe = query_dataframe.sample(n=weight)
+
+            sample_ids = query_dataframe['SampleId'].to_list()
+
+            if un_discard:
+                allow_op = pb2.DenySamplesOperation()
+                allow_op.sample_ids.extend(sample_ids)
+                request = pb2.TrainerCommand(
+                    remove_from_denylist_operation=allow_op
+                )
+            else:
+                deny_op = pb2.DenySamplesOperation()
+                deny_op.sample_ids.extend(sample_ids)
+                request = pb2.TrainerCommand(
+                    deny_samples_operation=deny_op
+                )
+            response = stub.ExperimentCommand(request)
+            print(
+                f"[Train Query] {query}, Weight: {weight}, Un-discard: {un_discard}, "
+                f"Sample count: {len(sample_ids)}, Response: {response.message}"
+            )
+
+        except Exception as e:
+            print(f"[ERROR] Train query failed: {e}")
+
+        return no_update
+
+
+    @app.callback(
+        Input('run-eval-data-query', 'n_clicks'),
+        State('eval-data-query-input', 'value'),
+        State('eval-data-query-weight', 'value'),
+        State('eval-query-discard-toggle', 'value'),
+        prevent_initial_call=True
+    )
+    def run_eval_query_on_dataset(_, query, weight, toggle_values):
+        if 'sortby' in query.lower():
+            return no_update
+        
         if weight is None:
             weight = 1.0
 
-        # dataframe = pd.DataFrame(
-        #     sample_statistics_to_data_records(
-        #     data_representation_response.sample_statistics))
-        # query_dataframe = dataframe.query(query)
-        query_dataframe = ui_state.samples_df.query(query)
+        un_discard = 'undiscard' in toggle_values
+        try:
+            query_dataframe = ui_state.eval_samples_df.query(query)
 
-        if weight <= 1.0:
-            query_dataframe = query_dataframe.sample(frac=weight)
-        elif type(weight) is int:
-            query_dataframe = query_dataframe.sample(n=weight)
+            if weight <= 1.0:
+                query_dataframe = query_dataframe.sample(frac=weight)
+            elif isinstance(weight, int):
+                query_dataframe = query_dataframe.sample(n=weight)
 
-        discarded_samples = query_dataframe['SampleId'].to_list()
-        deny_samples_operation = pb2.DenySamplesOperation()
-        deny_samples_operation.sample_ids.extend(discarded_samples)
-        deny_samples_request = pb2.TrainerCommand(
-            deny_samples_operation=deny_samples_operation)
-        deny_samples_response = stub.ExperimentCommand(deny_samples_request)
+            sample_ids = query_dataframe['SampleId'].to_list()
 
-        print(
-            f"Query: {query}, Weight: {weight}, "
-            f"Response: {deny_samples_response}")
+            if un_discard:
+                allow_op = pb2.DenySamplesOperation()
+                allow_op.sample_ids.extend(sample_ids)
+                request = pb2.TrainerCommand(
+                    remove_eval_from_denylist_operation=allow_op
+                )
+            else:
+                deny_op = pb2.DenySamplesOperation()
+                deny_op.sample_ids.extend(sample_ids)
+                request = pb2.TrainerCommand(
+                    deny_eval_samples_operation=deny_op
+                )
+
+            response = stub.ExperimentCommand(request)
+            print(
+                f"[Eval Query] {query}, Weight: {weight}, Un-discard: {un_discard}, "
+                f"Sample count: {len(sample_ids)}, Response: {response.message}"
+            )
+
+        except Exception as e:
+            print(f"[ERROR] Eval query failed: {e}")
 
         return no_update
+
 
     @app.callback(
         Output('train-data-div', 'style', allow_duplicate=True),

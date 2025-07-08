@@ -14,9 +14,8 @@ import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 from weights_lab import (
     UIState,
-    get_play_button_html_elements,
-    get_pause_button_html_elements,
-    get_hyper_params_div,
+    get_pause_play_button,
+    get_header_hyper_params_div,
     _DISPLAY_COLUMNS,
 )
 from scope_timer import ScopeTimer
@@ -37,7 +36,7 @@ initial_state = stub.ExperimentCommand(
     pb2.TrainerCommand(
         get_hyper_parameters=True,
         get_interactive_layers=False,
-        get_data_records="train"
+        # get_data_records="train"
     )
 )
 ui_state.update_from_server_state(initial_state)
@@ -169,6 +168,24 @@ def format_for_table(val, task_type):
             except Exception:
                 return str(val)
         return str(val)
+
+def parse_sort_info(query):
+    if not query or 'sortby' not in query.lower():
+        return None
+    match = re.search(r'sortby\s+([a-zA-Z0-9_, \s]+)', query, re.IGNORECASE)
+    if not match:
+        return None
+    cols, dirs = [], []
+    for part in match.group(1).split(','):
+        tokens = part.strip().split()
+        if not tokens:
+            continue
+        col = tokens[0]
+        direction = tokens[1].lower() if len(tokens) > 1 and tokens[1].lower() in ['asc', 'desc'] else 'asc'
+        cols.append(col)
+        dirs.append(direction == 'asc')
+    return {'cols': cols, 'dirs': dirs} if cols else None
+
 
 def get_data_tab(ui_state: UIState):
     cols = []
@@ -402,10 +419,8 @@ def get_data_tab(ui_state: UIState):
 
 app.layout = html.Div([
     dcc.Interval(id='datatbl-render-freq', interval=5000, n_intervals=0),
-    get_hyper_params_div(ui_state),
+    get_header_hyper_params_div(ui_state),
     get_data_tab(ui_state),
-    dcc.Store(id='train-sort-store', data=None),
-    dcc.Store(id='eval-sort-store', data=None),
 ])
 
 @app.callback(
@@ -432,10 +447,10 @@ def send_to_controller_hyper_parameters_on_change(
         is_training = resume_pause_clicks % 2
         hyper_parameter.is_training = is_training
         if is_training:
-            button_children = get_pause_button_html_elements()
+            button_children = get_pause_play_button()
             hyper_parameter.training_steps_to_do = hyper_param_values[5]
         else:
-            button_children = get_play_button_html_elements()
+            button_children = get_pause_play_button()
             hyper_parameter.training_steps_to_do = 0
     else:
         btn_dict = eval(prop_id.split('.')[0])
@@ -463,10 +478,11 @@ def send_to_controller_hyper_parameters_on_change(
 @app.callback(
     Output('train-data-table', 'data'),
     Input('datatbl-render-freq', 'n_intervals'),
+    Input('run-train-data-query', 'n_clicks'),
     State('table-refresh-checkbox', 'value'),
-    State('train-sort-store', 'data'),
+    State('train-data-query-input', 'value'),
 )
-def update_train_data_table(_, chk, sort_info):
+def update_train_data_table(_, __, chk, query):
     if 'refresh_regularly' not in chk:
         return no_update
 
@@ -480,7 +496,7 @@ def update_train_data_table(_, chk, sort_info):
             if col in df.columns:
                 df[col] = df[col].apply(lambda v: format_for_table(v, "classification"))
 
-
+    sort_info = parse_sort_info(query)
     if sort_info:
         try:
             df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
@@ -493,10 +509,11 @@ def update_train_data_table(_, chk, sort_info):
 @app.callback(
     Output('eval-data-table', 'data'),
     Input('datatbl-render-freq', 'n_intervals'),
-    State('table-refresh-checkbox', 'value'),
-    State('eval-sort-store', 'data'),
+    Input('run-eval-data-query', 'n_clicks'),
+    State('eval-table-refresh-checkbox', 'value'),
+    State('eval-data-query-input', 'value'),
 )
-def update_eval_data_table(_, chk, sort_info):
+def update_eval_data_table(_, __, chk, query):
     if 'refresh_regularly' not in chk:
         return no_update
 
@@ -510,12 +527,14 @@ def update_eval_data_table(_, chk, sort_info):
             if col in df.columns:
                 df[col] = df[col].apply(lambda v: format_for_table(v, "classification"))
 
+    sort_info = parse_sort_info(query)
     if sort_info:
         try:
             df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
         except Exception as e:
             print(f"[ERROR] Failed to sort eval data: {e}")
     return df.to_dict('records')
+
 
 @app.callback(
     Output('train-data-table', 'page_size'),
@@ -672,7 +691,7 @@ def run_eval_query_on_dataset(_, query, weight, toggle_values):
     State('table-refresh-checkbox', 'value')
 )
 def handle_manual_train_row_deletion(current_data, prev_data, chk):
-    if not prev_data:
+    if prev_data is None:
         return no_update
     prev_ids = {r['SampleId'] for r in prev_data}
     curr_ids = {r['SampleId'] for r in current_data}
@@ -716,60 +735,6 @@ def handle_manual_eval_row_deletion(current_data, prev_data, chk):
         return prev_data
     return current_data
 
-
-@app.callback(
-    Output('train-sort-store', 'data'),
-    Input('run-train-data-query', 'n_clicks'),
-    State('train-data-query-input', 'value'),
-    prevent_initial_call=True
-)
-def sort_train_table(_, query):
-    if not query:
-        return None
-
-    match = re.search(r'sortby\s+([a-zA-Z0-9_, \s]+)', query, re.IGNORECASE)
-    if not match:
-        return None
-
-    cols, dirs = [], []
-
-    for part in match.group(1).split(','):
-        tokens = part.strip().split()
-        if not tokens:
-            continue
-        col = tokens[0]
-        direction = tokens[1].lower() if len(tokens) > 1 and tokens[1].lower() in ['asc', 'desc'] else 'asc'
-        cols.append(col)
-        dirs.append(direction == 'asc')
-
-    return {'cols': cols, 'dirs': dirs} if cols else None
-
-@app.callback(
-    Output('eval-sort-store', 'data'),
-    Input('run-eval-data-query', 'n_clicks'),
-    State('eval-data-query-input', 'value'),
-    prevent_initial_call=True
-)
-def sort_eval_table(_, query):
-    if not query:
-        return None
-
-    match = re.search(r'sortby\s+([a-zA-Z0-9_, \s]+)', query, re.IGNORECASE)
-    if not match:
-        return None
-
-    cols, dirs = [], []
-
-    for part in match.group(1).split(','):
-        tokens = part.strip().split()
-        if not tokens:
-            continue
-        col = tokens[0]
-        direction = tokens[1].lower() if len(tokens) > 1 and tokens[1].lower() in ['asc', 'desc'] else 'asc'
-        cols.append(col)
-        dirs.append(direction == 'asc')
-
-    return {'cols': cols, 'dirs': dirs} if cols else None
 
 @app.callback(
     Output('train-data-table', 'selected_rows'),
