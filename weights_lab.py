@@ -2755,7 +2755,7 @@ def main():
 
         return figure
 
-    app.run(debug=False,port=8050)
+    app.run(debug=False, port=8050)
 
 if __name__ == '__main__':
     main()
