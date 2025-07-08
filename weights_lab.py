@@ -966,6 +966,7 @@ def get_neuron_query_input_div(ui_state: UIState):
                     {"label": "Delete", "value": "delete"},
                     {"label": "Reinitialize", "value": "reinitialize"},
                     {"label": "Freeze", "value": "freeze"},
+                    {"label": "Add Neurons", "value": "add_neurons"}
                 ],
                 value="highlight",  # Default value
                 placeholder="Select an action",  # Placeholder text
@@ -2238,6 +2239,20 @@ def main():
         elif action == "freeze":
             weight_operation=pb2.WeightOperation(
                 op_type=pb2.WeightOperationType.FREEZE)
+            
+        elif action == "add_neurons":
+            selected_df = ui_state.get_layers_df().query(query)
+            try:
+                n = int(weight) if weight else 1
+            except:
+                print(f"Invalid weight parameter for add_neurons: {weight}")
+                return
+            for _, row in selected_df.iterrows():
+                weight_operation = pb2.WeightOperation(
+                    op_type=pb2.WeightOperationType.ADD_NEURONS,
+                    layer_id=row['layer_id'],
+                    neurons_to_add=n
+                )
 
         if weight_operation:
             for idx, row in selected_neurons_df.reset_index().iterrows():
