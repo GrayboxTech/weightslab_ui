@@ -341,13 +341,15 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         if request.HasField('deny_samples_operation'):
             denied_cnt = len(request.deny_samples_operation.sample_ids)
             experiment.train_loader.dataset.denylist_samples(
-                set(request.deny_samples_operation.sample_ids))
+                set(request.deny_samples_operation.sample_ids),
+                accumulate = True)
             return pb2.CommandResponse(
                 success=True, message=f"Denied {denied_cnt} train samples")
         if request.HasField('deny_eval_samples_operation'):
             denied_cnt = len(request.deny_eval_samples_operation.sample_ids)
             experiment.eval_loader.dataset.denylist_samples(
-                set(request.deny_eval_samples_operation.sample_ids))
+                set(request.deny_eval_samples_operation.sample_ids),
+                accumulate = True)
             return pb2.CommandResponse(
                 success=True, message=f"Denied {denied_cnt} eval samples")
 
