@@ -1564,115 +1564,6 @@ def get_data_tab(ui_state: UIState):
         'width': '87vw'
     })
 
-# def get_data_tab(ui_state: UIState):
-#     data_table_columns = []
-#     for column in _DISPLAY_COLUMNS:
-#         if column == "Encounters":
-#             continue
-
-#         data_table_column = {
-#             "name": column,
-#             "id": column,
-#             "type": "text" if column == "Discarded" else 'any'
-#         }
-#         if column == "LastLoss":
-#             data_table_column["format"] = Format(
-#                 precision=2, scheme=Scheme.fixed)
-#         data_table_columns.append(data_table_column)
-
-#     data_records = ui_state.samples_df.to_dict('records')
-#     data_table = dash_table.DataTable(
-#         id='train-data-table',
-#         data=data_records,
-#         columns=data_table_columns,
-#         sort_action="native",
-#         page_action="native",
-#         row_selectable='multi',
-#         row_deletable=True,
-#         editable=True,
-#         virtualization=True,
-#         # modified
-#         # page_size=500,
-#         page_size = 50,
-#         style_table={
-#             "margin": "2px",
-#             'padding': '2px',
-#             "display": "flex",
-#             'height': '25vh',
-#             "overflowY": "auto", 
-#             'width': '38vw',
-#         },
-#         style_cell={
-#             'textAlign': 'left',
-#             'minWidth': '4vw',
-#             'maxWidth': '4.5vw'
-#         }
-#     )
-#     inspect_data_sample_checkbox = dcc.Checklist(
-#         id='sample-inspect-checkboxes',
-#         options=[
-#             {'label': 'Inspect on click', 'value': 'inspect_sample_on_click'},
-#             # {'label': 'Activation maps', 'value': 'inspect_activation_maps'},
-#         ],
-#         value=[],
-#         inline=True,
-#         labelStyle={'marginRight': '5px'},
-#     )
-#     table_refrehs_checkbox = dcc.Checklist(
-#         id='table-refresh-checkbox',
-#         options=[
-#             {'label': 'Refresh regularly', 'value': 'refresh_regularly'},
-#             {'label': 'Discard by flag flip', 'value': 'discard_by_flag_flip'},
-#         ],
-#         value=['refresh_regularly', 'discard_by_flag_flip'],
-#         inline=True,
-#         labelStyle={'marginRight': '5px'},
-#     )
-#     table_with_query_div = html.Div(
-#         id="data-panel-col0",
-#         children=[
-#             html.H2("Train Dataset"),
-#             table_refrehs_checkbox,
-#             inspect_data_sample_checkbox,
-#             data_table,
-#             get_data_query_input_div(ui_state),
-#         ]
-#     )
-#     image_inspect_div = html.Div(
-#         id="data-panel-col1",
-#         children=[],
-#         # className="d-flex justify-content-center align-items-center",
-#         style={
-#             "display": "flex",
-#             "justifyContent": "center",
-#             "alignItems": "center",
-#         }
-#     )
-#     width_percent = 43
-
-#     return html.Div(    
-#         id='train-data-div',
-#         children=[
-#             dbc.Row(
-#                 id="data-panel-row",
-#                 children=[
-#                     dbc.Col(table_with_query_div),
-#                     dbc.Col(image_inspect_div)
-#                 ],
-#             )
-#         ],
-#         style={
-#             'aling': 'center',
-#             'margin': '4vw',
-#             'padding': '2vw',
-#             'borderRadius': '15px',
-#             'border': '2px solid #666',
-#             'boxShadow': '0 4px 8px rgba(0,0,0,0.1)',
-#             'width': f'{width_percent}vw',
-#             'maxWdith': f'{width_percent+2}vw',
-#         }
-#     )
-
 def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected):
     return html.Div([
         html.Div([
@@ -1778,17 +1669,21 @@ def format_for_table(val, task_type):
 
 
 def rewrite_query_for_lists(query, task_type, ui_state: UIState):
-    """
-    For segmentation tasks: rewrites queries like '5 in Target' to 'TargetClassesStr.str.contains("5")'
-    so that pandas query can handle array values.
-    """
     if task_type == "segmentation" and query:
         pattern = re.compile(r"(\d+)\s+in\s+(Target|Prediction)")
-        def repl(match):
-            val, col = match.groups()
-            return f'{col}ClassesStr.str.contains("{val}")'
-        return pattern.sub(repl, query)
-    return query
+        matches = pattern.findall(query)
+        if matches:
+            def filter_fn(df):
+                mask = None
+                for val, col in matches:
+                    this_mask = df[f"{col}ClassesStr"].str.split(",").apply(lambda x: any(xx == val for xx in x))
+                    if mask is None:
+                        mask = this_mask
+                    else:
+                        mask &= this_mask
+                return df[mask]
+            return filter_fn
+    return None
 
 def get_query_context(tab_type, ui_state: UIState):
     if tab_type == "train":
@@ -2378,8 +2273,11 @@ def main():
                 for col in ["Prediction", "Target"]:
                     if col in df.columns:
                         df[col + "ClassesStr"] = df[col].apply(lambda arr: ",".join([str(x) for x in arr]))
-            query = rewrite_query_for_lists(query, task_type, ui_state)
-            query_dataframe = df.query(query)
+            filter_fn = rewrite_query_for_lists(query, task_type, ui_state)
+            if filter_fn:
+                query_dataframe = filter_fn(df)
+            else:
+                query_dataframe = df.query(query)
 
             if weight <= 1.0:
                 query_dataframe = query_dataframe.sample(frac=weight)

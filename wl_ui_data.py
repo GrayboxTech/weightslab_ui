@@ -170,18 +170,21 @@ def format_for_table(val, task_type):
         return str(val)
 
 def rewrite_query_for_lists(query, task_type):
-    """
-    For segmentation: rewrites queries like '5 in Target' to 'TargetClassesStr.str.contains("5")'
-    so that pandas query can handle array values.
-    """
-    import re
     if task_type == "segmentation" and query:
         pattern = re.compile(r"(\d+)\s+in\s+(Target|Prediction)")
-        def repl(match):
-            val, col = match.groups()
-            return f'{col}ClassesStr.str.contains("{val}")'
-        return pattern.sub(repl, query)
-    return query
+        matches = pattern.findall(query)
+        if matches:
+            def filter_fn(df):
+                mask = None
+                for val, col in matches:
+                    this_mask = df[f"{col}ClassesStr"].str.split(",").apply(lambda x: any(xx == val for xx in x))
+                    if mask is None:
+                        mask = this_mask
+                    else:
+                        mask &= this_mask
+                return df[mask]
+            return filter_fn
+    return None
 
 def get_query_context(tab_type):
     if tab_type == "train":
@@ -610,106 +613,6 @@ def render_samples(
     return panels
 
 
-# @app.callback(
-#     Input('run-train-data-query', 'n_clicks'),
-#     State('train-data-query-input', 'value'),
-#     State('data-query-input-weight', 'value'),
-#     State('train-query-discard-toggle', 'value'),
-#     prevent_initial_call=True
-# )
-# def run_query_on_dataset(_, query, weight, toggle_values):
-#     if 'sortby' in query.lower():
-#         return no_update
-    
-#     if weight is None:
-#         weight = 1.0
-#     un_discard = 'undiscard' in toggle_values
-
-#     try:
-
-#         query_dataframe = ui_state.samples_df.query(query)
-
-#         if weight <= 1.0:
-#             query_dataframe = query_dataframe.sample(frac=weight)
-#         elif isinstance(weight, int):
-#             query_dataframe = query_dataframe.sample(n=weight)
-
-#         sample_ids = query_dataframe['SampleId'].to_list()
-
-#         if un_discard:
-#             allow_op = pb2.DenySamplesOperation()
-#             allow_op.sample_ids.extend(sample_ids)
-#             request = pb2.TrainerCommand(
-#                 remove_from_denylist_operation=allow_op
-#             )
-#         else:
-#             deny_op = pb2.DenySamplesOperation()
-#             deny_op.sample_ids.extend(sample_ids)
-#             request = pb2.TrainerCommand(
-#                 deny_samples_operation=deny_op
-#             )
-#         response = stub.ExperimentCommand(request)
-#         print(
-#             f"[Train Query] {query}, Weight: {weight}, Un-discard: {un_discard}, "
-#             f"Sample count: {len(sample_ids)}, Response: {response.message}"
-#         )
-
-#     except Exception as e:
-#         print(f"[ERROR] Train query failed: {e}")
-
-#     return no_update
-
-
-# @app.callback(
-#     Input('run-eval-data-query', 'n_clicks'),
-#     State('eval-data-query-input', 'value'),
-#     State('eval-data-query-weight', 'value'),
-#     State('eval-query-discard-toggle', 'value'),
-#     prevent_initial_call=True
-# )
-# def run_eval_query_on_dataset(_, query, weight, toggle_values):
-#     if 'sortby' in query.lower():
-#         return no_update
-    
-#     if weight is None:
-#         weight = 1.0
-
-#     un_discard = 'undiscard' in toggle_values
-#     try:
-#         query_dataframe = ui_state.eval_samples_df.query(query)
-
-#         if weight <= 1.0:
-#             query_dataframe = query_dataframe.sample(frac=weight)
-#         elif isinstance(weight, int):
-#             query_dataframe = query_dataframe.sample(n=weight)
-
-#         sample_ids = query_dataframe['SampleId'].to_list()
-
-#         if un_discard:
-#             allow_op = pb2.DenySamplesOperation()
-#             allow_op.sample_ids.extend(sample_ids)
-#             request = pb2.TrainerCommand(
-#                 remove_eval_from_denylist_operation=allow_op
-#             )
-#         else:
-#             deny_op = pb2.DenySamplesOperation()
-#             deny_op.sample_ids.extend(sample_ids)
-#             request = pb2.TrainerCommand(
-#                 deny_eval_samples_operation=deny_op
-#             )
-
-#         response = stub.ExperimentCommand(request)
-#         print(
-#             f"[Eval Query] {query}, Weight: {weight}, Un-discard: {un_discard}, "
-#             f"Sample count: {len(sample_ids)}, Response: {response.message}"
-#         )
-
-#     except Exception as e:
-#         print(f"[ERROR] Eval query failed: {e}")
-
-#     return no_update
-
-
 @app.callback(
     Input('run-train-data-query', 'n_clicks'),
     Input('run-eval-data-query', 'n_clicks'),
@@ -725,7 +628,6 @@ def run_query_on_dataset(train_click, eval_click,
                         train_query, eval_query,
                         train_weight, eval_weight,
                         train_toggle, eval_toggle):
-    # Determine which button triggered
     ctx_triggered = dash.callback_context.triggered
     if not ctx_triggered:
         return no_update
@@ -760,8 +662,11 @@ def run_query_on_dataset(train_click, eval_click,
             for col in ["Prediction", "Target"]:
                 if col in df.columns:
                     df[col + "ClassesStr"] = df[col].apply(lambda arr: ",".join([str(x) for x in arr]))
-        query = rewrite_query_for_lists(query, task_type)
-        query_dataframe = df.query(query)
+        filter_fn = rewrite_query_for_lists(query, task_type)
+        if filter_fn:
+            query_dataframe = filter_fn(df)
+        else:
+            query_dataframe = df.query(query)
 
         if weight <= 1.0:
             query_dataframe = query_dataframe.sample(frac=weight)
