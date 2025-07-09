@@ -107,6 +107,7 @@ message HyperParameterCommand {
 
 message DenySamplesOperation {
   repeated int32 sample_ids = 1;
+  bool accumulate = 2;
 }
 
 message LoadCheckpointOperation {

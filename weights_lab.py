@@ -1445,6 +1445,15 @@ def get_data_tab(ui_state: UIState):
             ),
         ),
         dbc.Col(
+            dbc.Checklist(
+                id='train-denylist-accumulate-checkbox',
+                options=[{'label': 'Accumulate', 'value': 'accumulate'}],
+                value=[], 
+                inline=True,
+                style={'marginLeft': '1vw'}
+            ),
+        ),
+        dbc.Col(
             dbc.Input(
                 id='data-query-input-weight', type='number',
                 placeholder='weight',
@@ -1474,6 +1483,15 @@ def get_data_tab(ui_state: UIState):
                 options=[{'label': 'Un-discard', 'value': 'undiscard'}],
                 value=[],
                 inline=True
+            ),
+        ),
+        dbc.Col(
+            dbc.Checklist(
+                id='eval-denylist-accumulate-checkbox',
+                options=[{'label': 'Accumulate', 'value': 'accumulate'}],
+                value=[],
+                inline=True,
+                style={'marginLeft': '1vw'}
             ),
         ),
         dbc.Col(
@@ -2233,12 +2251,15 @@ def main():
         State('eval-data-query-weight', 'value'),
         State('train-query-discard-toggle', 'value'),
         State('eval-query-discard-toggle', 'value'),
+        State('train-denylist-accumulate-checkbox', 'value'),
+        State('eval-denylist-accumulate-checkbox', 'value'),
         prevent_initial_call=True
     )
     def run_query_on_dataset(train_click, eval_click,
                             train_query, eval_query,
                             train_weight, eval_weight,
-                            train_toggle, eval_toggle):
+                            train_toggle, eval_toggle,
+                            train_accumulate, eval_accumulate):
         ctx_triggered = dash.callback_context.triggered
         if not ctx_triggered:
             return no_update
@@ -2288,6 +2309,7 @@ def main():
             deny_op = pb2.DenySamplesOperation()
             deny_op.sample_ids.extend(sample_ids)
             request = pb2.TrainerCommand()
+            accumulate = 'accumulate' in (train_accumulate if tab_type == "train" else eval_accumulate)
             if un_discard:
                 if tab_type == "train":
                     request.remove_from_denylist_operation.CopyFrom(deny_op)
@@ -2296,9 +2318,10 @@ def main():
             else:
                 if tab_type == "train":
                     request.deny_samples_operation.CopyFrom(deny_op)
+                    request.deny_samples_operation.accumulate = accumulate
                 else:
                     request.deny_eval_samples_operation.CopyFrom(deny_op)
-
+                    request.deny_eval_samples_operation.accumulate = accumulate
 
             response = stub.ExperimentCommand(request)
             print(
