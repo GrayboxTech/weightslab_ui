@@ -82,7 +82,7 @@ eval_grid_dropdown = dcc.Dropdown(
     style={'width': '6vw'}
 )
 
-def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size):
+def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded):
     return html.Div([
         html.Div([
             html.Img(src=f'data:image/png;base64,{input_b64}', style={'width':f'{img_size}px','border':'1px solid #888'}),
@@ -96,16 +96,19 @@ def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_select
             html.Img(src=f'data:image/png;base64,{pred_mask_b64}', style={'width':f'{img_size}px','border':'1px solid blue'}),
             html.Div("Prediction", style={'fontSize':10, 'textAlign':'center'})
         ]),
-    ], style={'display':'flex', 
-              'flexDirection':'row', 
-              'gap':'4px', 
-              'marginBottom':'8px', 
-              'border': '4px solid red' if is_selected else 'none',
-              'transition': 'border 0.3s ease-in-out'
-              })
+    ], style={
+        'display':'flex', 
+        'flexDirection':'row', 
+        'gap':'4px', 
+        'marginBottom':'8px', 
+        'border': '4px solid red' if is_selected else 'none',
+        'transition': 'border 0.3s, opacity 0.3s',
+        'opacity': 0.25 if is_discarded else 1.0  
+    })
 
 
-def render_images(sample_ids, selected_ids, origin):
+
+def render_images(sample_ids, selected_ids, origin, discarded_ids=None):
     task_type = getattr(ui_state, "task_type", "classification")
     imgs = []
     num_images = len(sample_ids)
@@ -127,23 +130,29 @@ def render_images(sample_ids, selected_ids, origin):
                 gt_mask_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
                 pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
                 is_selected = sid in selected_ids
-                imgs.append(render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size))
+                is_discarded = sid in (discarded_ids or set())
+                imgs.append(render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded))
+
         else:
             for sample in batch_response.samples:
                 sid = sample.sample_id
                 b64 = base64.b64encode(sample.raw_data).decode('utf-8')
-                border = '4px solid red' if sid in selected_ids else '1px solid #ccc'
+                is_selected = sid in selected_ids
+                is_discarded = sid in (discarded_ids or set())
+                border = '4px solid red' if is_selected else '1px solid #ccc'
+                style = {
+                    'width': f'{img_size}px',
+                    'height': f'{img_size}px',
+                    'margin': '0.1vh',
+                    'border': border,
+                    'transition': 'border 0.3s, opacity 0.3s',
+                    'objectFit': 'contain',
+                    'imageRendering': 'auto',
+                    'opacity': 0.25 if is_discarded else 1.0  
+                }
                 imgs.append(html.Img(
                     src=f'data:image/png;base64,{b64}',
-                    style={
-                        'width': f'{img_size}px',
-                        'height': f'{img_size}px',
-                        'margin': '0.1vh',
-                        'border': border,
-                        'transition': 'border 0.3s ease-in-out',
-                        'objectFit': 'contain',
-                        'imageRendering': 'auto'
-                    }
+                    style=style
                 ))
     except Exception as e:
         print(f"[ERROR] {origin} sample rendering failed: {e}")
@@ -626,13 +635,14 @@ def render_samples(
         df = ui_state.samples_df
         ids = [row['SampleId'] for row in train_viewport if row['SampleId'] in df['SampleId'].values]
         selected_ids = set(df.iloc[i]['SampleId'] for i in train_selected_rows or [])
-        panels[0] = render_images(ids, selected_ids, origin='train')
-
+        discarded_ids = set(df.loc[df['Discarded'], 'SampleId'])
+        panels[0] = render_images(ids, selected_ids, origin='train', discarded_ids=discarded_ids)
     elif tab == 'eval' and 'inspect_sample_on_click' in eval_flags and eval_viewport:
         df = ui_state.eval_samples_df
         ids = [row['SampleId'] for row in eval_viewport if row['SampleId'] in df['SampleId'].values]
         selected_ids = set(df.iloc[i]['SampleId'] for i in eval_selected_rows or [])
-        panels[1] = render_images(ids, selected_ids, origin='eval')
+        discarded_ids = set(df.loc[df['Discarded'], 'SampleId'])
+        panels[1] = render_images(ids, selected_ids, origin='eval', discarded_ids=discarded_ids)
 
     return panels
 
