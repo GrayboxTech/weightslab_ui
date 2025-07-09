@@ -1330,7 +1330,7 @@ def get_data_tab(ui_state: UIState):
     grid_preset_dropdown = dcc.Dropdown(
         id='grid-preset-dropdown',
         options=[
-            {'label': str(x * x), 'value': x * x} for x in [3, 4, 5, 6]
+            {'label': str(x * x), 'value': x * x} for x in [3, 4, 5, 6, 7, 10]
         ],
         value=9,
         clearable=False,
@@ -1339,7 +1339,7 @@ def get_data_tab(ui_state: UIState):
 
     eval_grid_dropdown = dcc.Dropdown(
         id='eval-grid-preset-dropdown',
-        options=[{'label': str(x * x), 'value': x * x} for x in [3, 4, 5, 6]],
+        options=[{'label': str(x * x), 'value': x * x} for x in [3, 4, 5, 6, 7, 10]],
         value=9,
         clearable=False,
         style={'width': '6vw'}
@@ -1582,18 +1582,18 @@ def get_data_tab(ui_state: UIState):
         'width': '87vw'
     })
 
-def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected):
+def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size):
     return html.Div([
         html.Div([
-            html.Img(src=f'data:image/png;base64,{input_b64}', style={'width':'64px','border':'1px solid #888'}),
+            html.Img(src=f'data:image/png;base64,{input_b64}', style={'width':f'{img_size}px','border':'1px solid #888'}),
             html.Div("Input", style={'fontSize':10, 'textAlign':'center'})
         ]),
         html.Div([
-            html.Img(src=f'data:image/png;base64,{gt_mask_b64}', style={'width':'64px','border':'1px solid green'}),
+            html.Img(src=f'data:image/png;base64,{gt_mask_b64}', style={'width':f'{img_size}px','border':'1px solid green'}),
             html.Div("Target", style={'fontSize':10, 'textAlign':'center'})
         ]),
         html.Div([
-            html.Img(src=f'data:image/png;base64,{pred_mask_b64}', style={'width':'64px','border':'1px solid blue'}),
+            html.Img(src=f'data:image/png;base64,{pred_mask_b64}', style={'width':f'{img_size}px','border':'1px solid blue'}),
             html.Div("Prediction", style={'fontSize':10, 'textAlign':'center'})
         ]),
     ], style={'display':'flex', 
@@ -1607,12 +1607,17 @@ def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_select
 def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin):
     task_type = getattr(ui_state, "task_type", "classification")
     imgs = []
+    num_images = len(sample_ids)
+    cols = isqrt(num_images) or 1
+    rows = cols
+    img_size = int(512 / max(cols, rows))
+
     try:
         batch_response = stub.GetSamples(pb2.BatchSampleRequest(
             sample_ids=sample_ids,
             origin=origin,
-            resize_width=256,
-            resize_height=256
+            resize_width=img_size,
+            resize_height=img_size
         ))
         if task_type == "segmentation":
             for sample in batch_response.samples:
@@ -1621,7 +1626,7 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin):
                 gt_mask_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
                 pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
                 is_selected = sid in selected_ids
-                imgs.append(render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected))
+                imgs.append(render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size))
         else:
             for sample in batch_response.samples:
                 sid = sample.sample_id
@@ -1630,8 +1635,8 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin):
                 imgs.append(html.Img(
                     src=f'data:image/png;base64,{b64}',
                     style={
-                        'width': '128px',
-                        'height': '128px',
+                        'width': f'{img_size}px',
+                        'height': f'{img_size}px',
                         'margin': '0.1vh',
                         'border': border,
                         'transition': 'border 0.3s ease-in-out',
@@ -1643,13 +1648,14 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin):
         print(f"[ERROR] {origin} sample rendering failed: {e}")
         return no_update
 
-    cols = isqrt(len(sample_ids)) or 1
+
     return html.Div(children=imgs, style={
         'display': 'grid',
         'gridTemplateColumns': f'repeat({cols}, 1fr)',
         'columnGap': '0.1vw',
         'rowGap': '0.1vh',
-        'width': 'auto',
+        'width': '512px',
+        'height': '512px',
         'justifyItems': 'center',
         'alignItems': 'center',
         'paddingLeft': '0.01vw'
