@@ -1514,7 +1514,7 @@ def get_data_tab(ui_state: UIState):
         children=[
             dcc.Tab(label='Train Dataset', value='train', children=[
                 html.Div([
-                    html.H2("Train Dataset"),
+                    html.H2("Train Dataset", id="train-dataset-header"),
                     train_controls,
                     html.Div([
                         html.Div([train_table], style={
@@ -2249,6 +2249,7 @@ def main():
 
     @app.callback(
         Output('train-data-table', 'data'),
+        Output('train-dataset-header', 'children'),
         Input('datatbl-render-freq', 'n_intervals'),
         Input('run-train-data-query', 'n_clicks'),
         State('table-refresh-checkbox', 'value'),
@@ -2274,7 +2275,9 @@ def main():
                 df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
             except Exception as e:
                 print(f"[ERROR] Failed to sort train data: {e}")
-        return df.to_dict('records')
+
+        num_available_samples = (~df["Discarded"]).sum()
+        return df.to_dict('records'), f"Train Dataset #{num_available_samples} samples"
 
 
 
