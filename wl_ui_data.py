@@ -82,12 +82,42 @@ eval_grid_dropdown = dcc.Dropdown(
     style={'width': '6vw'}
 )
 
-def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded):
+def label_below_img(img_component, last_loss, img_size):
     return html.Div([
-        html.Div([
-            html.Img(src=f'data:image/png;base64,{input_b64}', style={'width':f'{img_size}px','border':'1px solid #888'}),
-            html.Div("Input", style={'fontSize':10, 'textAlign':'center'})
-        ]),
+        img_component,
+        html.Div(
+            f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -",
+            style={'fontSize': '11px', 'lineHeight': '15px', 'textAlign': 'center', 'marginTop': '2px'}
+        )
+    ], style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center', 'width': f'{img_size}px'})
+
+
+def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded, sid=None, last_loss=None):
+    input_img_div = html.Div([
+        html.Img(
+            src=f'data:image/png;base64,{input_b64}',
+            style={'width':f'{img_size}px','border':'1px solid #888'}
+        ),
+        html.Div(
+            f"ID: {sid}", style={
+                'position': 'absolute', 'top': '2px', 'left': '4px',
+                'background': 'rgba(0,0,0,0.55)', 'color': 'white',
+                'fontSize': '10px', 'padding': '1px 5px', 'borderRadius': '3px'
+            }
+        ) if sid is not None else None,
+        html.Div(
+            f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -",
+            style={
+                'position': 'absolute', 'top': '2px', 'right': '4px',
+                'background': 'rgba(0,0,0,0.55)', 'color': 'white',
+                'fontSize': '10px', 'padding': '1px 5px', 'borderRadius': '3px'
+            }
+        ) if last_loss is not None else None,
+        html.Div("Input", style={'fontSize':10, 'textAlign':'center'})
+    ], style={'position': 'relative', 'display': 'inline-block', 'width': f'{img_size}px', 'height': f'{img_size}px'})
+    
+    return html.Div([
+        input_img_div,
         html.Div([
             html.Img(src=f'data:image/png;base64,{gt_mask_b64}', style={'width':f'{img_size}px','border':'1px solid green'}),
             html.Div("Target", style={'fontSize':10, 'textAlign':'center'})
@@ -115,6 +145,11 @@ def render_images(sample_ids, selected_ids, origin, discarded_ids=None):
     cols = isqrt(num_images) or 1
     rows = cols
     img_size = int(512 / max(cols, rows))
+    if origin == "train":
+        df = ui_state.samples_df
+    else:
+        df = ui_state.eval_samples_df
+    id_to_loss = {int(row["SampleId"]): row.get("LastLoss", None) for _, row in df.iterrows()}
 
     try:
         batch_response = stub.GetSamples(pb2.BatchSampleRequest(
@@ -131,7 +166,17 @@ def render_images(sample_ids, selected_ids, origin, discarded_ids=None):
                 pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
                 is_selected = sid in selected_ids
                 is_discarded = sid in (discarded_ids or set())
-                imgs.append(render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded))
+                last_loss = id_to_loss.get(sid, None)
+                triplet = render_segmentation_triplet(...)
+                triplet_with_label = html.Div([
+                    triplet,
+                    html.Div(
+                        f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -",
+                        style={'fontSize': '11px', 'lineHeight': '15px', 'textAlign': 'center', 'marginTop': '2px'}
+                    )
+                ], style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center', 'width': f'{img_size*3 + 12}px'})
+                imgs.append(triplet_with_label)
+
 
         else:
             for sample in batch_response.samples:
@@ -150,10 +195,11 @@ def render_images(sample_ids, selected_ids, origin, discarded_ids=None):
                     'imageRendering': 'auto',
                     'opacity': 0.25 if is_discarded else 1.0  
                 }
-                imgs.append(html.Img(
-                    src=f'data:image/png;base64,{b64}',
-                    style=style
-                ))
+                img = html.Img(src=f'data:image/png;base64,{b64}', style=style)
+                last_loss = id_to_loss.get(sid, None)
+                imgs.append(label_below_img(img, last_loss, img_size))
+
+
     except Exception as e:
         print(f"[ERROR] {origin} sample rendering failed: {e}")
         return no_update
@@ -164,8 +210,10 @@ def render_images(sample_ids, selected_ids, origin, discarded_ids=None):
         'gridTemplateColumns': f'repeat({cols}, 1fr)',
         'columnGap': '0.1vw',
         'rowGap': '0.1vh',
-        'width': '512px',
-        'height': '512px',
+        'width': '100%',
+        'height': 'auto',
+        'maxWidth': 'calc(100vw - 40vw)', 
+        'boxSizing': 'border-box',
         'justifyItems': 'center',
         'alignItems': 'center',
         'paddingLeft': '0.01vw'
@@ -233,8 +281,6 @@ def parse_sort_info(query):
 def get_data_tab(ui_state: UIState):
     cols = []
     for column in _DISPLAY_COLUMNS:
-        if column == "Encounters":
-            continue
         spec = {"name": column, "id": column,
                 "type": "text" if column == "Discarded" else 'any'}
         if column == "LastLoss":
