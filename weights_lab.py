@@ -55,7 +55,7 @@ _LAYER_DF_COLUMNS = [
     "kernel_size", "sorted_by"]
 
 _METRICS_DF_COLUMNS = [
-    "experiment_name", "model_age", "metric_name", "metric_value"]
+    "experiment_name", "model_age", "metric_name", "metric_value", "run_id"]
 
 _ANNOTATIONS_DF_COLUMNS = [
     "experiment_name", "model_age", "annotation", "metadata"]
@@ -268,6 +268,7 @@ class UIState:
         self.exp_name_metric_name_2_plot = defaultdict(lambda: None)
         self.exp_name_metric_name_2_anot = defaultdict(lambda: [])
         self.exp_name_2_need_redraw = defaultdict(lambda: False)
+        self.current_run_id = 0
 
         self.exp_names = set()
         self.met_names = set()
@@ -318,19 +319,33 @@ class UIState:
 
         if relevant_df.empty:
             return []
-        plot = go.Scatter(
-            x=relevant_df["model_age"],
-            y=relevant_df["metric_value"],
-            mode='lines',
-            name=exp_name,
-            line=dict(color=self.exp_name_2_color[exp_name]),
-        )
-        self.exp_name_metric_name_2_plot[key] = plot
-        annotation_plots = self._get_annot_plots(exp_name, metric_name)
-        self.exp_name_metric_name_2_anot[key] = annotation_plots
-        self.exp_name_2_need_redraw[exp_name] = False
+        first = True
+        if 'run_id' in relevant_df.columns:
+            traces = []
+            for run_id, run_df in relevant_df.groupby("run_id"):
+                trace = go.Scatter(
+                    x=run_df["model_age"],
+                    y=run_df["metric_value"],
+                    mode='lines',
+                    name=exp_name,
+                    line=dict(color=self.exp_name_2_color[exp_name]),
+                    showlegend=first,
+                )
+                traces.append(trace)
+                first = False
+        else:
+            # fallback: original behavior
+            traces = [go.Scatter(
+                x=relevant_df["model_age"],
+                y=relevant_df["metric_value"],
+                mode='lines',
+                name=exp_name,
+                line=dict(color=self.exp_name_2_color[exp_name]),
+            )]
 
-        return [plot] + annotation_plots
+        annotation_plots = self._get_annot_plots(exp_name, metric_name)
+        return traces + annotation_plots
+
 
     def _get_annot_plots(self, exp_name, met_name):
         plots = []
@@ -524,6 +539,7 @@ class UIState:
                 status.model_age,
                 status.metrics_status.name,
                 status.metrics_status.value,
+                self.current_run_id
             ]
             with self.metrics_lock:
                 self.metrics_df.loc[len(self.metrics_df)] = metrics_row
@@ -1668,7 +1684,7 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin, dis
                 is_selected = sid in selected_ids
                 is_discarded = sid in (discarded_ids or set())
                 last_loss = id_to_loss.get(sid, None)
-                triplet = render_segmentation_triplet(...)
+                triplet = render_segmentation_triplet(ui_state, stub, input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded, sid, last_loss)
                 triplet_with_label = html.Div([
                     triplet,
                     html.Div(
@@ -2678,11 +2694,13 @@ def main():
 
     @app.callback(
         Output({'type': "graph", "index": MATCH}, "figure", allow_duplicate=True),
+        Output({'type': "graph", "index": MATCH}, "ClickData"),
         [
             Input({'type': "graph", "index": MATCH}, 'hoverData'),
             Input({'type': "graph", "index": MATCH}, 'clickData'),
         ],
         State({'type': "graph", "index": MATCH}, "figure"),
+        prevent_initial_call = True
     )
     def update_selection_of_checkpoint(hoverData, clickData, figure):
         nonlocal stub
@@ -2753,11 +2771,22 @@ def main():
                 load_checkpoint_request)
 
             print(f"Checkpoint load result: {ckpt_load_result}")
+            ui_state.current_run_id += 1
+
+            update_request = pb2.TrainerCommand(
+                get_hyper_parameters=True,
+                get_interactive_layers=True
+            )
+            updated_state = stub.ExperimentCommand(update_request)
+            ui_state.update_from_server_state(updated_state)
 
             if checkpoint_id_to_load is not None:
                 print("Figure data: ", figure['data'][t_min])
 
-        return figure
+            return figure, None
+
+        return figure, no_update
+
 
     app.run(debug=False, port=8050)
 

@@ -6,7 +6,7 @@ import threading
 import grpc
 import time
 import argparse
-
+import numpy as np
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 import plotly.graph_objs as go
@@ -14,9 +14,8 @@ import plotly.graph_objs as go
 from weights_lab import (
     UIState,
     get_plots_div,
-    get_hyper_params_div,
-    get_play_button_html_elements,
-    get_pause_button_html_elements,
+    get_header_hyper_params_div,
+    get_pause_play_button
 )
 
 def parse_args():
@@ -66,7 +65,7 @@ app.title = "WeightsLab - Plots Only"
 app.layout = html.Div([
     dcc.Interval(id='graphss-render-freq', interval=10000, n_intervals=0),
     html.H1("Experiment Plots", style={'textAlign': 'center'}),
-    get_hyper_params_div(ui_state),
+    get_header_hyper_params_div(ui_state),
     get_plots_div()
 ])
 
@@ -88,7 +87,7 @@ def send_to_controller_hyper_parameters_on_change(hyper_param_values, resume_pau
     if "resume-pause-train-btn" in prop_id:
         is_training = resume_pause_clicks % 2
         hyper_parameter.is_training = is_training
-        button_children = get_pause_button_html_elements() if is_training else get_play_button_html_elements()
+        button_children = get_pause_play_button() if is_training else get_pause_play_button()
         hyper_parameter.training_steps_to_do = hyper_param_values[5] if is_training else 0
     else:
         btn_dict = eval(prop_id.split('.')[0])
@@ -204,6 +203,102 @@ def update_graph(_, graph_id, checklist):
         )
     }
     return figure
+
+
+@app.callback(
+    Output({'type': "graph", "index": MATCH}, "figure", allow_duplicate=True),
+    Output({'type': "graph", "index": MATCH}, "ClickData"),
+    [
+        Input({'type': "graph", "index": MATCH}, 'hoverData'),
+        Input({'type': "graph", "index": MATCH}, 'clickData'),
+    ],
+    State({'type': "graph", "index": MATCH}, "figure"),
+    prevent_initial_call = True
+)
+def update_selection_of_checkpoint(hoverData, clickData, figure):
+    # print("update_selection_of_checkpoint", hoverData, clickData, figure)
+
+    if hoverData is None or 'points' not in hoverData:
+        return no_update
+
+    cursor_x = hoverData['points'][0]['x']
+    cursor_y = hoverData['points'][0]['y']
+
+    x_min, y_min, t_min, i_min, min_dist = None, None, None, None, 1e10
+
+    if 'data' not in figure:
+        return no_update
+
+    for t_idx, trace_data in enumerate(figure['data']):
+        if "ckpt" not in trace_data['name']:
+            continue
+        x_data = np.array(trace_data['x'])
+        y_data = np.array(trace_data['y'])
+
+        for i, val in enumerate(x_data):
+            x_data[i] = 0 if val is None else val
+
+        for i, val in enumerate(y_data):
+            y_data[i] = 0 if val is None else val
+
+        if len(y_data) < len(x_data):
+            x_data = x_data[:-1]
+        elif len(x_data) < len(y_data):
+            y_data = y_data[:-1]
+
+        if x_data is None or y_data is None or x_data.size == 0 or \
+                y_data.size == 0 or cursor_x is None or cursor_y is None:
+            continue
+
+        # replace None in x_data and y_data with 0
+        x_data = np.nan_to_num(x_data)
+        try:
+            distances = np.sqrt(
+                (x_data - cursor_x) ** 2 + (y_data - cursor_y) ** 2)
+            min_index = np.argmin(distances)  # Index of the closest point
+            if distances[min_index] < min_dist:
+                x_min, y_min, t_min, i_min, min_dist = (
+                    x_data[min_index], y_data[min_index], t_idx, min_index,
+                    distances[min_index])
+        except Exception as e:
+            print(f"Error in update_selection_of_checkpoint: {e}")
+            continue
+
+    checkpoint_id_to_load = None
+    if t_min is not None and i_min is not None:
+        figure['data'][-1]['x'] = [x_min]
+        figure['data'][-1]['y'] = [y_min]
+
+        if i_min < len(figure['data'][t_min]["customdata"]):
+            checkpoint_id_to_load = \
+                figure['data'][t_min]["customdata"][i_min]
+
+    if clickData:
+        load_checkpoint_op = pb2.LoadCheckpointOperation(
+            checkpoint_id=checkpoint_id_to_load)
+        load_checkpoint_request = pb2.TrainerCommand(
+            load_checkpoint_operation=load_checkpoint_op)
+        ckpt_load_result = stub.ExperimentCommand(
+            load_checkpoint_request)
+
+        print(f"Checkpoint load result: {ckpt_load_result}")
+        ui_state.current_run_id += 1
+
+        update_request = pb2.TrainerCommand(
+            get_hyper_parameters=True,
+            get_interactive_layers=True
+        )
+        updated_state = stub.ExperimentCommand(update_request)
+        ui_state.update_from_server_state(updated_state)
+
+        if checkpoint_id_to_load is not None:
+            print("Figure data: ", figure['data'][t_min])
+
+        return figure, None
+
+    return figure, no_update
+
+
 
 if __name__ == '__main__':
     app.run_server(debug=False, port=8053)
