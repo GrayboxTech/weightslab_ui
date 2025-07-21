@@ -2707,6 +2707,10 @@ def main():
         nonlocal ui_state
         # print("update_selection_of_checkpoint", hoverData, clickData, figure)
 
+        ctx = dash.callback_context
+        if not ctx.triggered:
+            return figure, no_update
+
         if hoverData is None or 'points' not in hoverData:
             return no_update
 
@@ -2762,7 +2766,8 @@ def main():
                 checkpoint_id_to_load = \
                     figure['data'][t_min]["customdata"][i_min]
 
-        if clickData:
+        trigger = ctx.triggered[0]["prop_id"]
+        if "clickData" in trigger and clickData:
             load_checkpoint_op = pb2.LoadCheckpointOperation(
                 checkpoint_id=checkpoint_id_to_load)
             load_checkpoint_request = pb2.TrainerCommand(
