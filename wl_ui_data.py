@@ -20,6 +20,8 @@ from weights_lab import (
 )
 from scope_timer import ScopeTimer
 import numpy as np
+import random
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root_directory", type=str, required=True,
@@ -167,7 +169,7 @@ def render_images(sample_ids, selected_ids, origin, discarded_ids=None):
                 is_selected = sid in selected_ids
                 is_discarded = sid in (discarded_ids or set())
                 last_loss = id_to_loss.get(sid, None)
-                triplet = render_segmentation_triplet(...)
+                triplet = render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded, sid, last_loss)
                 triplet_with_label = html.Div([
                     triplet,
                     html.Div(
@@ -195,7 +197,13 @@ def render_images(sample_ids, selected_ids, origin, discarded_ids=None):
                     'imageRendering': 'auto',
                     'opacity': 0.25 if is_discarded else 1.0  
                 }
-                img = html.Img(src=f'data:image/png;base64,{b64}', style=style)
+                # img = html.Img(src=f'data:image/png;base64,{b64}', style=style)
+                img = html.Img(
+                    src=f'data:image/png;base64,{b64}',
+                    style=style,
+                    id={'type': 'sample-img-click', 'sample_id': sid, 'origin': origin},
+                    n_clicks=0
+                )
                 last_loss = id_to_loss.get(sid, None)
                 imgs.append(label_below_img(img, last_loss, img_size))
 
@@ -296,6 +304,8 @@ def get_data_tab(ui_state: UIState):
         page_size=16,
         row_selectable='multi',
         row_deletable=True,
+        selected_rows=[],
+        style_data_conditional=[],
         editable=True,
         virtualization=True,
         style_table={
@@ -317,6 +327,8 @@ def get_data_tab(ui_state: UIState):
         page_size=16,
         row_selectable='multi',
         row_deletable=True,
+        selected_rows=[],
+        style_data_conditional=[],
         editable=True,
         virtualization=True,
         style_table={
@@ -409,6 +421,14 @@ def get_data_tab(ui_state: UIState):
                 style={'width': '3vw'}
             ),
         ),
+        dbc.Col( 
+            dbc.Button(
+                "Progressive Chunk Update", id='progressive-chunk-train-btn',
+                color='success', 
+                n_clicks=0, 
+                style={'width': '12vw', 'marginLeft': '1vw'}
+            )
+        ),
     ])
 
     eval_query_div = dbc.Row([
@@ -449,6 +469,14 @@ def get_data_tab(ui_state: UIState):
                 n_clicks=0,
                 style={'width': '3vw'}
             ),
+        ),
+        dbc.Col( 
+            dbc.Button(
+                "Progressive Chunk Update", id='progressive-chunk-eval-btn',
+                color='success', 
+                n_clicks=0, 
+                style={'width': '12vw', 'marginLeft': '1vw'}
+            )
         ),
     ])
 
@@ -525,10 +553,53 @@ def get_data_tab(ui_state: UIState):
     })
 
 app.layout = html.Div([
+    dcc.Store(id='train-image-selected-ids', data=[]),
+    dcc.Store(id='eval-image-selected-ids', data=[]),
     dcc.Interval(id='datatbl-render-freq', interval=5000, n_intervals=0),
     get_header_hyper_params_div(ui_state),
     get_data_tab(ui_state),
 ])
+
+def progressive_chunk_update_v2(ui_state, stub, chunk_weight):
+    df = ui_state.samples_df.copy()
+    current_train = df[~df['Discarded']]
+    prev_batch = current_train[current_train['LastLoss'] != -1]
+    untrained = df[(df['Discarded']) & (df['LastLoss'] == -1)]
+
+    misclassified = prev_batch[prev_batch['Prediction'] != prev_batch['Target']]
+    correct = prev_batch[prev_batch['Prediction'] == prev_batch['Target']]
+
+    keep_correct = correct.sample(frac=0.5) if not correct.empty else correct
+
+    available_ids = untrained['SampleId'].tolist()
+    if len(available_ids) == 0:
+        return "No more new samples to add."
+
+    if isinstance(chunk_weight, float) and 0 < chunk_weight < 1:
+        n_new = int(len(available_ids) * chunk_weight)
+    else:
+        n_new = int(chunk_weight)
+    n_new = max(1, min(n_new, len(available_ids)))
+    new_chunk = random.sample(available_ids, n_new)
+
+    keep_ids = (
+        misclassified['SampleId'].tolist() +
+        keep_correct['SampleId'].tolist() +
+        new_chunk
+    )
+
+    deny_ids = [sid for sid in current_train['SampleId'] if sid not in keep_ids]
+    allow_ids = keep_ids
+
+    if deny_ids:
+        deny_op = pb2.DenySamplesOperation(sample_ids=deny_ids, accumulate=False)
+        stub.ExperimentCommand(pb2.TrainerCommand(deny_samples_operation=deny_op))
+    if allow_ids:
+        allow_op = pb2.DenySamplesOperation(sample_ids=allow_ids, accumulate=False)
+        stub.ExperimentCommand(pb2.TrainerCommand(remove_from_denylist_operation=allow_op))
+
+    return (f"Added {len(new_chunk)} new, kept {len(misclassified)} misclassified, "
+            f"{len(keep_correct)} correct (50%), denied {len(deny_ids)}")
 
 @app.callback(
         Output('resume-pause-train-btn', 'children', allow_duplicate=True),
@@ -661,8 +732,10 @@ def update_eval_page_size(grid_count):
     Output('train-sample-panel', 'children', allow_duplicate=True),
     Output('eval-sample-panel', 'children', allow_duplicate=True),
     Input('train-data-table', 'derived_viewport_data'),
+    Input('train-image-selected-ids', 'data'),
     Input('train-data-table', 'selected_rows'),
     Input('eval-data-table', 'derived_viewport_data'),
+    Input('eval-image-selected-ids', 'data'),
     Input('eval-data-table', 'selected_rows'),
     Input('sample-inspect-checkboxes', 'value'),
     Input('eval-sample-inspect-checkboxes', 'value'),
@@ -670,8 +743,8 @@ def update_eval_page_size(grid_count):
     prevent_initial_call=True
 )
 def render_samples(
-    train_viewport, train_selected_rows,
-    eval_viewport, eval_selected_rows,
+    train_viewport, train_selected_ids, train_selected_rows,
+    eval_viewport, eval_selected_ids, eval_selected_rows,
     train_flags, eval_flags,
     tab
 ):
@@ -682,13 +755,15 @@ def render_samples(
         ids = [row['SampleId'] for row in train_viewport if row['SampleId'] in df['SampleId'].values]
         selected_ids = set(df.iloc[i]['SampleId'] for i in train_selected_rows or [])
         discarded_ids = set(df.loc[df['Discarded'], 'SampleId'])
-        panels[0] = render_images(ids, selected_ids, origin='train', discarded_ids=discarded_ids)
+        # panels[0] = render_images(ids, selected_ids, origin='train', discarded_ids=discarded_ids)
+        panels[0] = render_images(ids, set(train_selected_ids), origin='train', discarded_ids=discarded_ids)
     elif tab == 'eval' and 'inspect_sample_on_click' in eval_flags and eval_viewport:
         df = ui_state.eval_samples_df
         ids = [row['SampleId'] for row in eval_viewport if row['SampleId'] in df['SampleId'].values]
         selected_ids = set(df.iloc[i]['SampleId'] for i in eval_selected_rows or [])
         discarded_ids = set(df.loc[df['Discarded'], 'SampleId'])
-        panels[1] = render_images(ids, selected_ids, origin='eval', discarded_ids=discarded_ids)
+        # panels[1] = render_images(ids, selected_ids, origin='eval', discarded_ids=discarded_ids)
+        panels[1] = render_images(ids, set(eval_selected_ids or []), origin='eval', discarded_ids=discarded_ids)
 
     return panels
 
@@ -869,6 +944,98 @@ def update_selection_from_image_click(all_clicks, train_data, eval_data):
         return dash.no_update, [idx] if idx is not None else []
 
     return dash.no_update, dash.no_update
+
+
+@app.callback(
+    Output('train-image-selected-ids', 'data', allow_duplicate=True),
+    Output('eval-image-selected-ids', 'data', allow_duplicate=True),
+    Input({'type': 'sample-img-click', 'sample_id': ALL, 'origin': ALL}, 'n_clicks'),
+    State('train-image-selected-ids', 'data'),
+    State('eval-image-selected-ids', 'data'),
+    prevent_initial_call=True
+)
+def toggle_image_selection(clicks, train_ids, eval_ids):
+    triggered = ctx.triggered_id
+    if not triggered or 'sample_id' not in triggered:
+        return dash.no_update, dash.no_update
+
+    sid = triggered['sample_id']
+    origin = triggered['origin']
+    train_ids = train_ids or []
+    eval_ids = eval_ids or []
+
+    if origin == "train":
+        if sid in train_ids:
+            train_ids = [x for x in train_ids if x != sid]
+        else:
+            train_ids = train_ids + [sid]
+        return train_ids, dash.no_update
+    elif origin == "eval":
+        if sid in eval_ids:
+            eval_ids = [x for x in eval_ids if x != sid]
+        else:
+            eval_ids = eval_ids + [sid]
+        return dash.no_update, eval_ids
+    return dash.no_update, dash.no_update
+
+
+@app.callback(
+    Output('train-data-table', 'selected_rows', allow_duplicate=True),
+    Output('eval-data-table', 'selected_rows', allow_duplicate=True),
+    Input('train-image-selected-ids', 'data'),
+    Input('eval-image-selected-ids', 'data'),
+    State('train-data-table', 'data'),
+    State('eval-data-table', 'data'),
+    prevent_initial_call=True
+)
+def update_table_selection_from_store(train_selected_ids, eval_selected_ids, train_data, eval_data):
+    train_idx = []
+    eval_idx = []
+    if train_selected_ids:
+        train_idx = [i for i, row in enumerate(train_data) if row["SampleId"] in train_selected_ids]
+    if eval_selected_ids:
+        eval_idx = [i for i, row in enumerate(eval_data) if row["SampleId"] in eval_selected_ids]
+    return train_idx, eval_idx
+
+@app.callback(
+    Output('train-data-table', 'style_data_conditional'),
+    Input('train-data-table', 'selected_rows'),
+    State('train-data-table', 'data')
+)
+def highlight_selected_rows(selected_rows, data):
+    if not selected_rows:
+        return []
+    filter_query = ' || '.join([f'{{SampleId}} = {data[i]["SampleId"]}' for i in selected_rows])
+    return [{
+        "if": {"filter_query": filter_query},
+        "backgroundColor": "#ffe6b3",
+        "fontWeight": "bold"
+    }]
+
+
+@app.callback(
+    Output('train-image-selected-ids', 'data', allow_duplicate=True),
+    Output('eval-image-selected-ids', 'data', allow_duplicate=True),
+    Input('train-data-table', 'selected_rows'),
+    Input('eval-data-table', 'selected_rows'),
+    State('train-data-table', 'data'),
+    State('eval-data-table', 'data'),
+    prevent_initial_call=True
+)
+def store_highlighted_samples(train_selected_rows, eval_selected_rows, train_data, eval_data):
+    train_ids = []
+    eval_ids = []
+    if train_selected_rows and train_data:
+        train_ids = [train_data[i]['SampleId'] for i in train_selected_rows]
+    if eval_selected_rows and eval_data:
+        eval_ids = [eval_data[i]['SampleId'] for i in eval_selected_rows]
+
+    if not train_selected_rows:
+        train_ids = []
+    if not eval_selected_rows:
+        eval_ids = []
+        
+    return train_ids, eval_ids
 
 
 if __name__ == '__main__':
