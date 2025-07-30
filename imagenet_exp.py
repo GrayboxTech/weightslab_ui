@@ -21,27 +21,37 @@ class TinyImageNetNet(NetworkWithOps, nn.Module):
         super().__init__()
         self.tracking_mode = TrackingMode.DISABLED
 
-        self.conv1 = Conv2dWithNeuronOps(3,   64, kernel_size=3, padding=1)
-        self.bn1   = BatchNorm2dWithNeuronOps(64)
+        self.conv1 = Conv2dWithNeuronOps(3,   8, kernel_size=3, padding=1)
+        self.bn1   = BatchNorm2dWithNeuronOps(8)
 
-        self.conv2 = Conv2dWithNeuronOps(64, 128, kernel_size=3, padding=1)
-        self.bn2   = BatchNorm2dWithNeuronOps(128)
+        self.conv2 = Conv2dWithNeuronOps(8, 16, kernel_size=3, padding=1)
+        self.bn2   = BatchNorm2dWithNeuronOps(16)
 
-        self.conv3 = Conv2dWithNeuronOps(128, 256, kernel_size=3, padding=1)
-        self.bn3   = BatchNorm2dWithNeuronOps(256)
+        self.conv3 = Conv2dWithNeuronOps(16, 32, kernel_size=3, padding=1)
+        self.bn3   = BatchNorm2dWithNeuronOps(32)
+
+        self.conv4 = Conv2dWithNeuronOps(32, 64, kernel_size=3, padding=1)
+        self.bn4   = BatchNorm2dWithNeuronOps(64)
+
+        self.conv5 = Conv2dWithNeuronOps(64, 128, kernel_size=3, padding=1)
+        self.bn5   = BatchNorm2dWithNeuronOps(128)
 
         self.pool = nn.MaxPool2d(2)                 # down-sample ×2
         self.gap  = nn.AdaptiveAvgPool2d(1)         # 4×4 → 1×1
         self.dropout = nn.Dropout(p=0.20)
 
-        self.fc = LinearWithNeuronOps(256, 200)
+        self.fc1 = LinearWithNeuronOps(128, 128)
+        self.fc2 = LinearWithNeuronOps(128, 256)
+        self.fc3 = LinearWithNeuronOps(256, 200)
 
     def children(self):
         return [
             self.conv1, self.bn1,
             self.conv2, self.bn2,
             self.conv3, self.bn3,
-            self.fc
+            self.conv4, self.bn4,
+            self.conv5, self.bn5,
+            self.fc1, self.fc2, self.fc3
         ]
 
     def define_deps(self):
@@ -51,22 +61,29 @@ class TinyImageNetNet(NetworkWithOps, nn.Module):
             (self.conv2, self.bn2, DepType.SAME),
             (self.bn2,   self.conv3, DepType.INCOMING),
             (self.conv3, self.bn3, DepType.SAME),
-            (self.bn3,   self.fc,   DepType.INCOMING)
+            (self.bn3,   self.conv4, DepType.INCOMING),
+            (self.conv4, self.bn4, DepType.SAME),
+            (self.bn4,   self.conv5, DepType.INCOMING),
+            (self.conv5, self.bn5, DepType.SAME),
+            (self.bn5,   self.fc1,   DepType.INCOMING),
+            (self.fc1,   self.fc2,   DepType.INCOMING),
+            (self.fc2,   self.fc3,   DepType.INCOMING)
         ])
-        # last BN layer is the flatten boundary for WeightsLab
         self.flatten_conv_id = self.bn3.get_module_id()
 
     def forward(self, x):
         self.maybe_update_age(x)
-
-        x = self.pool(F.relu(self.bn1(self.conv1(x))))  # 64 → 32
-        x = self.pool(F.relu(self.bn2(self.conv2(x))))  # 32 → 16
-        x = self.pool(F.relu(self.bn3(self.conv3(x))))  # 16 → 8
-        x = self.pool(x)                                # 8 → 4
-        x = self.gap(x)                                 # 4×4 → 1×1
-        x = x.view(x.size(0), -1)                       # (B, 192)
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))  # 64→32
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))  # 32→16
+        x = self.pool(F.relu(self.bn3(self.conv3(x))))  # 16→8
+        x = self.pool(F.relu(self.bn4(self.conv4(x))))  # 8→4
+        x = self.pool(F.relu(self.bn5(self.conv5(x))))  # 4→2
+        x = self.gap(x)                                 # 2x2 → 1x1
+        x = x.view(x.size(0), -1)                       # (B, 128)
         x = self.dropout(x)
-        return self.fc(x)                               # logits (B, 200)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        return self.fc3(x)                             
     
 # Normalization
 mean = [0.485, 0.456, 0.406]
@@ -86,7 +103,12 @@ transform_test = tt.Compose([
 train_set = ImageFolder('./data/tiny-imagenet-200/train', transform=transform_train)
 test_set = ImageFolder('./data/tiny-imagenet-200/val/classified', transform=transform_test)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.backends.mps.is_available():
+    device = torch.device("mps")
+else:
+    device = torch.device("cpu")
+print('device:', device)
 
 def custom_top5_accuracy(output, labels):
     top5 = output.topk(5, dim=1).indices
@@ -95,12 +117,8 @@ def custom_top5_accuracy(output, labels):
 
 metrics = {
     "acc": MulticlassAccuracy(num_classes=200, average="micro").to(device),
-    "f1": MulticlassF1Score(num_classes=200, average="macro").to(device),
-    "top5": custom_top5_accuracy
 }
 
-def custom_mse_loss(outputs, targets):
-    return ((outputs - targets) ** 2).mean()
 
 def get_exp():
     model = TinyImageNetNet()
@@ -118,9 +136,9 @@ def get_exp():
         criterion=nn.CrossEntropyLoss(reduction='none'),  
         metrics=metrics,
         training_steps_to_do=30000,
-        name="tinyimagenet_exp",
-        root_log_dir="tinyimagenet-exp-test1",
-        logger=Dash("tinyimagenet-exp-test1"),
+        name="v0",
+        root_log_dir="tinyimagenet-exp1",
+        logger=Dash("tinyimagenet-exp1"),
         skip_loading=False
     )
 
