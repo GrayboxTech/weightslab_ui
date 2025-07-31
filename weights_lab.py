@@ -1367,6 +1367,7 @@ def get_data_tab(ui_state: UIState):
         page_action="native",
         page_size=16,
         row_selectable='multi',
+        style_data_conditional=[],
         row_deletable=True,
         editable=True,
         virtualization=True,
@@ -1388,6 +1389,7 @@ def get_data_tab(ui_state: UIState):
         page_action="native",
         page_size=16,
         row_selectable='multi',
+        style_data_conditional=[],
         row_deletable=True,
         editable=True,
         virtualization=True,
@@ -1798,6 +1800,8 @@ def get_query_context(tab_type, ui_state: UIState):
 
 def get_ui_app_layout(ui_state: UIState) -> html.Div:
     layout_children = [
+        dcc.Store(id='train-image-selected-ids', data=[]),
+        dcc.Store(id='eval-image-selected-ids', data=[]),
         dcc.Interval(id='weights-render-freq', interval=1*1000, n_intervals=0),
         dcc.Interval(id='datatbl-render-freq', interval=10*1000, n_intervals=0),
         dcc.Interval(id='graphss-render-freq', interval=10*1000, n_intervals=0),
@@ -2233,20 +2237,31 @@ def main():
         elif action == "freeze":
             weight_operation=pb2.WeightOperation(
                 op_type=pb2.WeightOperationType.FREEZE)
-            
+
         elif action == "add_neurons":
             selected_df = ui_state.get_layers_df().query(query)
-            try:
-                n = int(weight) if weight else 1
-            except:
-                print(f"Invalid weight parameter for add_neurons: {weight}")
-                return
             for _, row in selected_df.iterrows():
+                outgoing_neurons = row['outgoing']
+                layer_id = row['layer_id']
+
+                if isinstance(weight, float) and 0 < weight < 1:
+                    neurons_to_add = max(1, int(round(outgoing_neurons * weight)))
+                elif isinstance(weight, int) and weight >= 1:
+                    neurons_to_add = int(weight)
+                else:
+                    print(f"Invalid weight parameter for add_neurons: {weight}")
+                    continue
+
                 weight_operation = pb2.WeightOperation(
                     op_type=pb2.WeightOperationType.ADD_NEURONS,
-                    layer_id=row['layer_id'],
-                    neurons_to_add=n
+                    layer_id=layer_id,
+                    neurons_to_add=neurons_to_add
                 )
+                request = pb2.WeightsOperationRequest(weight_operation=weight_operation)
+                response = stub.ManipulateWeights(request)
+                print(f"Added {neurons_to_add} neurons to layer {layer_id}, response: {response}")
+
+            return
 
         if weight_operation:
             for idx, row in selected_neurons_df.reset_index().iterrows():
