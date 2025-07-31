@@ -2615,6 +2615,45 @@ def main():
         if "discard_by_flag_flip" in table_checkboxes:
             return previous_data
         return current_data
+    
+    @app.callback(
+        Output('train-image-selected-ids', 'data'),
+        Input('train-data-table', 'selected_rows'),
+        State('train-data-table', 'data'),
+        prevent_initial_call=True
+    )
+    def store_selected_sample_ids(selected_rows, data):
+        if not selected_rows or not data:
+            return []
+        return [data[i]['SampleId'] for i in selected_rows]
+
+    @app.callback(
+        Output('train-data-table', 'selected_rows', allow_duplicate=True),
+        Input('train-image-selected-ids', 'data'),
+        Input('train-data-table', 'data'),
+        prevent_initial_call=True
+    )
+    def restore_selected_rows(selected_ids, data):
+        if not selected_ids or not data:
+            return []
+        id2idx = {row['SampleId']: idx for idx, row in enumerate(data)}
+        return [id2idx[sid] for sid in selected_ids if sid in id2idx]
+
+    @app.callback(
+        Output('train-data-table', 'style_data_conditional'),
+        Input('train-data-table', 'selected_rows'),
+        State('train-data-table', 'data')
+    )
+    def highlight_selected(selected_rows, data):
+        if not selected_rows or not data:
+            return []
+        sample_ids = [data[i]['SampleId'] for i in selected_rows]
+        filter_query = ' || '.join([f'{{SampleId}} = {sid}' for sid in sample_ids])
+        return [{
+            "if": {"filter_query": filter_query},
+            "backgroundColor": "#ffe6b3",
+            "fontWeight": "bold"
+        }] if sample_ids else []
 
     @app.callback(
         Output('experiment_checklist', 'options', allow_duplicate=True),
