@@ -55,6 +55,8 @@ EOF
 echo "🔁 Setting up local tunnel (port 50051)..."
 ssh -i $KEY_PATH -f -N -L 50051:localhost:50051 $EC2_USER@$EC2_HOST
 
+sleep 5
+
 # Start UI
 echo "📊 Launching WeightsLab UI locally..."
 python3 weights_lab.py --root_directory $LOCAL_DATA_PATH
