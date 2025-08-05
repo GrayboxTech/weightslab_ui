@@ -239,3 +239,11 @@ def get_exp():
     )
 
     return exp
+
+
+if __name__ == "__main__":
+    exp = get_exp()
+    exp.set_is_training(True)
+    for step in range(10):
+        exp.train_step_or_eval_full()
+        print(f'Step {step+1}')
