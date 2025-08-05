@@ -231,8 +231,8 @@ def get_exp():
         metrics=metrics,
         training_steps_to_do=30000,
         name="v0",
-        root_log_dir="tinyimagenet-exp3",
-        logger=Dash("tinyimagenet-exp3"),
+        root_log_dir="tinyimagenet-exp2_ckpt",
+        logger=Dash("tinyimagenet-exp2_ckpt"),
         skip_loading=False
     )
 
