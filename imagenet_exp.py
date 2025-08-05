@@ -198,7 +198,9 @@ train_set = ImageFolder('./data/tiny-imagenet-200/train', transform=transform_tr
 test_set = ImageFolder('./data/tiny-imagenet-200/val/classified', transform=transform_test)
 
 #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-if torch.backends.mps.is_available():
+if torch.cuda.is_available():
+    device = torch.device("cuda")
+elif torch.backends.mps.is_available():
     device = torch.device("mps")
 else:
     device = torch.device("cpu")
@@ -231,8 +233,8 @@ def get_exp():
         metrics=metrics,
         training_steps_to_do=30000,
         name="v0",
-        root_log_dir="tinyimagenet-exp2_ckpt",
-        logger=Dash("tinyimagenet-exp2_ckpt"),
+        root_log_dir="tinyimagenet-exp3_ckpt",
+        logger=Dash("tinyimagenet-exp3_ckpt"),
         skip_loading=False
     )
 
