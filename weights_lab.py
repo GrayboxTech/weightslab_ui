@@ -88,7 +88,7 @@ _PLOTS_COLOR_WHEEL = [
 ]
 
 _DISPLAY_COLUMNS = [
-    "SampleId", "Target", "Prediction"
+    "SampleId", "Target", "Prediction", "LastLoss"
 ]
 
 _BUTTON_STYLE = {
