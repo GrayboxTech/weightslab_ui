@@ -1338,6 +1338,7 @@ def get_data_tab(ui_state: UIState):
         spec = {"name": column, "id": column,
                 "type": "text" if column == "Discarded" else 'any'}
         if column == "LastLoss":
+            spec["type"] = "numeric"
             spec["format"] = Format(precision=2, scheme=Scheme.fixed)
         cols.append(spec)
 
