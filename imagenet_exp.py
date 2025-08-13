@@ -106,27 +106,27 @@ class TinyImageNet_2(NetworkWithOps, nn.Module):
         super().__init__()
         self.tracking_mode = TrackingMode.DISABLED
 
-        self.conv1 = Conv2dWithNeuronOps(3,   16, kernel_size=3, padding=1)
-        self.bn1   = BatchNorm2dWithNeuronOps(16)
+        self.conv1 = Conv2dWithNeuronOps(3,   8, kernel_size=3, padding=1)
+        self.bn1   = BatchNorm2dWithNeuronOps(8)
 
-        self.conv2 = Conv2dWithNeuronOps(16, 32, kernel_size=3, padding=1)
-        self.bn2   = BatchNorm2dWithNeuronOps(32)
+        self.conv2 = Conv2dWithNeuronOps(8, 16, kernel_size=3, padding=1)
+        self.bn2   = BatchNorm2dWithNeuronOps(16)
 
-        self.conv3 = Conv2dWithNeuronOps(32, 64, kernel_size=3, padding=1)
-        self.bn3   = BatchNorm2dWithNeuronOps(64)
+        self.conv3 = Conv2dWithNeuronOps(16, 32, kernel_size=3, padding=1)
+        self.bn3   = BatchNorm2dWithNeuronOps(32)
 
-        self.conv4 = Conv2dWithNeuronOps(64, 128, kernel_size=3, padding=1)
-        self.bn4   = BatchNorm2dWithNeuronOps(128)
+        self.conv4 = Conv2dWithNeuronOps(32, 64, kernel_size=3, padding=1)
+        self.bn4   = BatchNorm2dWithNeuronOps(64)
 
-        self.conv5 = Conv2dWithNeuronOps(128, 256, kernel_size=3, padding=1)
-        self.bn5   = BatchNorm2dWithNeuronOps(256)
+        self.conv5 = Conv2dWithNeuronOps(64, 128, kernel_size=3, padding=1)
+        self.bn5   = BatchNorm2dWithNeuronOps(128)
 
         self.pool = nn.MaxPool2d(2)
         self.gap  = nn.AdaptiveAvgPool2d(1)
         self.dropout = nn.Dropout(p=0.3)
 
-        self.fc1 = LinearWithNeuronOps(256, 512)
-        self.fc2 = LinearWithNeuronOps(512, 200)
+        self.fc1 = LinearWithNeuronOps(128, 256)
+        self.fc2 = LinearWithNeuronOps(256, 200)
 
         self.softmax = nn.Softmax(dim=1)
 
