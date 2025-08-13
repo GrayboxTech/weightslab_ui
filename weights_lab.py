@@ -28,7 +28,7 @@ import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 import pandas as pd
 import plotly.graph_objs as go
-from dash import dcc, html, MATCH, ALL, no_update
+from dash import dcc, html, MATCH, ALL, no_update, ctx
 from dash.dependencies import Input, Output, State
 import logging
 import collections
@@ -707,6 +707,21 @@ def get_header_hyper_params_div(
         [header_div, section],
         style=custom_styles['main_card']
     )
+
+def _get_next_layer_id(ui_state: UIState, curr_layer_id: int) -> int | None:
+    layers_df = ui_state.get_layers_df().sort_values("layer_id")
+    ids = list(layers_df["layer_id"].values)
+    if curr_layer_id not in ids:
+        return None
+    idx = ids.index(curr_layer_id)
+    return ids[idx + 1] if idx + 1 < len(ids) else None
+
+def _get_incoming_count(ui_state: UIState, layer_id: int) -> int | None:
+    row = ui_state.get_layer_df_row_by_id(layer_id)
+    if isinstance(row, pd.Series) and 'incoming' in row.index:
+        val = int(row['incoming'])
+        return val
+    return None
 
 class NeuronStatus(str, Enum):
     """Enum for neuron status in order to properly color code them."""
@@ -2130,27 +2145,67 @@ def main():
 
     @app.callback(
         Input({"type": "layer-add-btn", "layer_id": ALL}, "n_clicks"),
+        State('zerofy-options-checklist', 'value')
     )
-    def on_layer_add_neurons_callback(_,):
+    def on_layer_add_neurons_callback(n_clicks, zerofy_opts):
         print(f"[UI] WeightsLab.on_layer_add_neurons_callback.")
-        ctx = dash.callback_context
-
+        nonlocal ui_state
         if not ctx.triggered:
-            return no_update
+            return dash.no_update
+        triggered = ctx.triggered_id
+        if not triggered:
+            return dash.no_update
 
-        prop_id = ctx.triggered[0]['prop_id']
-        btn_dict = eval(prop_id.split('.')[0])
-        layer_id = btn_dict['layer_id']
+        layer_id = triggered['layer_id']  
+        n_add = 1
 
-        weight_operation=pb2.WeightOperation(
+        next_layer_id = _get_next_layer_id(ui_state, layer_id)
+        old_incoming = _get_incoming_count(ui_state, next_layer_id) if next_layer_id is not None else None
+
+        add_op = pb2.WeightOperation(
             op_type=pb2.WeightOperationType.ADD_NEURONS,
             layer_id=layer_id,
-            neurons_to_add=1)
+            neurons_to_add=n_add
+        )
+        stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=add_op))
 
-        request = pb2.WeightsOperationRequest(
-            weight_operation=weight_operation)
-        response = stub.ManipulateWeights(request)
-        print(f"Response: {response}")
+        if next_layer_id is None or old_incoming is None:
+            return 
+
+        new_from_ids = list(range(old_incoming, old_incoming + n_add))
+
+        selected_to_ids = ui_state.selected_neurons[next_layer_id] or []
+        predicates = []
+        if zerofy_opts:
+            if 'frozen' in zerofy_opts:
+                predicates.append(pb2.ZerofyPredicate.ZEROFY_PREDICATE_WITH_FROZEN)
+            if 'older' in zerofy_opts:
+                predicates.append(pb2.ZerofyPredicate.ZEROFY_PREDICATE_WITH_OLDER)
+
+
+        if not selected_to_ids and not predicates:
+            print("[UI] No ZEROFY targets (no selection & no predicates).")
+            return 
+
+        zerofy_op = pb2.WeightOperation(
+            op_type=pb2.WeightOperationType.ZEROFY,
+            layer_id=next_layer_id,
+            zerofy_from_incoming_ids=new_from_ids,
+            zerofy_to_neuron_ids=selected_to_ids
+        )
+        if predicates:
+            zerofy_op.zerofy_predicates.extend(predicates)
+
+        resp = stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=zerofy_op))
+        print(resp.message)
+
+        ui_state.update_from_server_state(
+            stub.ExperimentCommand(pb2.TrainerCommand(
+                get_hyper_parameters=True,
+                get_interactive_layers=True,
+            ))
+        )
+        return 
 
     @app.callback(
         Input({"type": "layer-freeze-btn", "layer_id": ALL}, "n_clicks"),
@@ -2218,8 +2273,9 @@ def main():
         State('neuron-query-input', 'value'),
         State('neuron-query-input-weight', 'value'),
         State('neuron-action-dropdown', "value"),
+        State('zerofy-options-checklist', 'value')
     )
-    def run_query_on_neurons(_, query, weight, action):
+    def run_query_on_neurons(_, query, weight, action, zerofy_opts):
         nonlocal ui_state
         print(
             f"[UI] WeightsLab.run_query_on_neurons {query}, {weight}, "
@@ -2264,26 +2320,62 @@ def main():
         elif action == "add_neurons":
             selected_df = ui_state.get_layers_df().query(query)
             for _, row in selected_df.iterrows():
-                outgoing_neurons = row['outgoing']
-                layer_id = row['layer_id']
+                layer_id = int(row['layer_id'])
+                outgoing_neurons = int(row['outgoing'])
 
                 if isinstance(weight, float) and 0 < weight < 1:
                     neurons_to_add = max(1, int(round(outgoing_neurons * weight)))
                 elif isinstance(weight, int) and weight >= 1:
                     neurons_to_add = int(weight)
                 else:
-                    print(f"Invalid weight parameter for add_neurons: {weight}")
+                    print(f"[UI][query add] Invalid weight for add_neurons: {weight}")
                     continue
 
-                weight_operation = pb2.WeightOperation(
+                next_layer_id = _get_next_layer_id(ui_state, layer_id)
+                old_incoming = _get_incoming_count(ui_state, next_layer_id) if next_layer_id is not None else None
+
+                add_op = pb2.WeightOperation(
                     op_type=pb2.WeightOperationType.ADD_NEURONS,
                     layer_id=layer_id,
                     neurons_to_add=neurons_to_add
                 )
-                request = pb2.WeightsOperationRequest(weight_operation=weight_operation)
-                response = stub.ManipulateWeights(request)
-                print(f"Added {neurons_to_add} neurons to layer {layer_id}, response: {response}")
+                stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=add_op))
 
+                if next_layer_id is None or old_incoming is None:
+                    continue
+
+                new_from_ids = list(range(old_incoming, old_incoming + neurons_to_add))
+
+                selected_to_ids = ui_state.selected_neurons[next_layer_id] or []
+                predicates = []
+                if zerofy_opts:
+                    if 'frozen' in zerofy_opts:
+                        predicates.append(pb2.ZerofyPredicate.ZEROFY_PREDICATE_WITH_FROZEN)
+                    if 'older' in zerofy_opts:
+                        predicates.append(pb2.ZerofyPredicate.ZEROFY_PREDICATE_WITH_OLDER)
+
+                if not selected_to_ids and not predicates:
+                    print("[UI][query add] No ZEROFY targets (no selection & no predicates).")
+                    continue
+
+                zerofy_op = pb2.WeightOperation(
+                    op_type=pb2.WeightOperationType.ZEROFY,
+                    layer_id=next_layer_id,
+                    zerofy_from_incoming_ids=new_from_ids,
+                    zerofy_to_neuron_ids=selected_to_ids
+                )
+                if predicates:
+                    zerofy_op.zerofy_predicates.extend(predicates)
+
+                resp = stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=zerofy_op))
+                print(resp.message)
+
+            ui_state.update_from_server_state(
+                stub.ExperimentCommand(pb2.TrainerCommand(
+                    get_hyper_parameters=True,
+                    get_interactive_layers=True,
+                ))
+            )
             return
 
         if weight_operation:
