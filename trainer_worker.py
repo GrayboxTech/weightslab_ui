@@ -16,11 +16,11 @@ from collections import defaultdict
 from torchvision import transforms
 from scope_timer import ScopeTimer
 
-# from fashion_mnist_exp import get_exp
+from fashion_mnist_exp import get_exp
 
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-from imagenet_exp import get_exp
+# from imagenet_exp import get_exp
 # from imagenet_convnext import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
@@ -517,6 +517,17 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 print(f"[Error] GetSamples({sid}) failed: {e}")
         return response
 
+    def _apply_zerofy(self, layer, from_ids, to_ids):
+        
+        in_max = int(layer.incoming_neuron_count)
+        out_max = int(layer.neuron_count)
+
+        from_set = {i for i in set(from_ids) if 0 <= i < in_max}
+        to_set   = {i for i in set(to_ids)   if 0 <= i < out_max}
+        if from_set and to_set and hasattr(layer, "zerofy_connections_from"):
+            layer.zerofy_connections_from(from_set, to_set)
+        else:
+            print("ZEROFY skipped (empty sets or no method)")
 
     def ManipulateWeights(self, request, context):
         # (f"ExperimentServiceServicer.ManipulateWeights({request})")
@@ -576,10 +587,46 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 message=f"Reinitialized {weight_operations.neuron_ids}")
             
         elif weight_operations.op_type == pb2.WeightOperationType.ZEROFY:
-            experiment.model.zerofy(layer_id=weight_operations.layer_id)
-            answer = pb2.WeightsOperationResponse(
+            layer_id = weight_operations.layer_id
+            layer = experiment.model.get_layer_by_id(layer_id)
+
+            from_ids = list(weight_operations.zerofy_from_incoming_ids)
+            to_ids   = list(weight_operations.zerofy_to_neuron_ids)
+
+            if len(weight_operations.zerofy_predicates) > 0:
+                frozen = set()
+                try:
+                    for nid in range(getattr(layer, "neuron_count", 0)):
+                        if layer.get_per_neuron_learning_rate(nid) == 0.0:
+                            frozen.add(nid)
+                except Exception:
+                    pass
+
+                older = set()
+                try:
+                    td_tracker = getattr(layer, "train_dataset_tracker", None)
+                    if td_tracker is not None:
+                        for nid in range(getattr(layer, "neuron_count", 0)):
+                            age = int(td_tracker.get_neuron_age(nid))
+                            if age > 0:
+                                older.add(nid)
+                except Exception:
+                    older = set()
+
+                expanded = set(to_ids)
+                for p in weight_operations.zerofy_predicates:
+                    if p == pb2.ZerofyPredicate.ZEROFY_PREDICATE_WITH_FROZEN:
+                        expanded |= frozen
+                    elif p == pb2.ZerofyPredicate.ZEROFY_PREDICATE_WITH_OLDER:
+                        expanded |= older
+                to_ids = list(expanded)
+
+            self._apply_zerofy(layer, from_ids, to_ids)
+
+            return pb2.WeightsOperationResponse(
                 success=True,
-                message=f"Zerofy applied to new neurons in layer {weight_operations.layer_id}")
+                message=f"Zerofied L{layer_id} from={sorted(set(from_ids))} to={sorted(set(to_ids))}"
+            )
 
         return answer
 

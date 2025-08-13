@@ -1257,12 +1257,34 @@ def get_weights_modal(ui_state: UIState):
         is_open=False,  # Initially closed
     )
 
+def zerofy_checklist():
+    checklist = dcc.Checklist(
+        id='zerofy-options-checklist',
+        options=[
+            {'label': 'zerofy with frozen', 'value': 'frozen'},
+            {'label': 'zerofy with older',  'value': 'older'},
+        ],
+        value=[],         
+        inline=True,
+        labelStyle={'marginRight': '10px'},
+    )
+    return dbc.Col(
+        children=[checklist],
+        style={
+            'display': 'flex',
+            'justifyContent': 'center',
+            'alignItems': 'center',
+        }
+    )
+
+
 
 def get_weights_div(ui_state: UIState):
     return html.Div(
         id="model-architecture-div",
         children=[
             stats_display_checklist(ui_state),
+            zerofy_checklist(),
             interactable_layers(ui_state),
             get_neuron_query_input_div(ui_state),
             get_weights_modal(ui_state),

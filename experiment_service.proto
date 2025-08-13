@@ -45,6 +45,12 @@ enum WeightOperationType {
   ADD_NEURONS = 10;
 }
 
+enum ZerofyPredicate {
+  ZEROFY_PREDICATE_NONE = 0;
+  ZEROFY_PREDICATE_WITH_FROZEN = 1; 
+  ZEROFY_PREDICATE_WITH_OLDER  = 2; 
+}
+
 message WeightOperation {
   optional WeightOperationType op_type = 1;
   optional int32 layer_id = 2;
@@ -61,6 +67,12 @@ message WeightOperation {
   int32 neurons_to_add = 9;
 
   repeated NeuronConnection connections_to_zerofy = 10;
+
+  repeated int32 zerofy_from_incoming_ids = 11;
+
+  repeated int32 zerofy_to_neuron_ids = 12;
+
+  repeated ZerofyPredicate zerofy_predicates = 13;
 }
 
 message WeightsOperationRequest {
