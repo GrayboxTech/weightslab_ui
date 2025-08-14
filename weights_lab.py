@@ -1725,14 +1725,23 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin, dis
                 is_discarded = sid in (discarded_ids or set())
                 last_loss = id_to_loss.get(sid, None)
                 triplet = render_segmentation_triplet(ui_state, stub, input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded, sid, last_loss)
-                triplet_with_label = html.Div([
-                    triplet,
-                    html.Div(
-                        f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -",
-                        style={'fontSize': '11px', 'lineHeight': '15px', 'textAlign': 'center', 'marginTop': '2px'}
-                    )
-                ], style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center', 'width': f'{img_size*3 + 12}px'})
-                imgs.append(triplet_with_label)
+                clickable = html.Div(
+                    [
+                        triplet,
+                        html.Div(
+                            f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -",
+                            style={'fontSize': '11px', 'lineHeight': '15px',
+                                'textAlign': 'center', 'marginTop': '2px'}
+                        )
+                    ],
+                    id={'type': 'sample-img', 'origin': origin, 'sid': sid},
+                    n_clicks=0,
+                    style={'cursor': 'pointer', 'width': f'{img_size*3 + 12}px',
+                        'display': 'flex', 'flexDirection': 'column',
+                        'alignItems': 'center'}
+                )
+                imgs.append(clickable)
+
 
 
         else:
@@ -1742,7 +1751,7 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin, dis
                 is_selected = sid in selected_ids
                 is_discarded = sid in (discarded_ids or set())
                 border = '4px solid red' if is_selected else '1px solid #ccc'
-                style = {
+                img_style = {
                     'width': f'{img_size}px',
                     'height': f'{img_size}px',
                     'margin': '0.1vh',
@@ -1750,11 +1759,16 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin, dis
                     'transition': 'border 0.3s, opacity 0.3s',
                     'objectFit': 'contain',
                     'imageRendering': 'auto',
-                    'opacity': 0.25 if is_discarded else 1.0  
+                    'opacity': 0.25 if is_discarded else 1.0
                 }
-                img = html.Img(src=f'data:image/png;base64,{b64}', style=style)
-                last_loss = id_to_loss.get(sid, None)
-                imgs.append(label_below_img(img, last_loss, img_size))
+                clickable = html.Div(
+                    label_below_img(html.Img(src=f'data:image/png;base64,{b64}', style=img_style),
+                                    id_to_loss.get(sid, None), img_size),
+                    id={'type': 'sample-img', 'origin': origin, 'sid': int(sid)},
+                    n_clicks=0,
+                    style={'cursor': 'pointer'}  # visual cue
+                )
+                imgs.append(clickable)
 
 
     except Exception as e:
@@ -2700,7 +2714,72 @@ def main():
             discarded_ids = set(ui_state.eval_samples_df.loc[ui_state.eval_samples_df['Discarded'], 'SampleId'])
             panels[1] = render_images(ui_state, stub, ids, selected_ids, origin='eval', discarded_ids=discarded_ids)
         return panels
+    
+    # TRAIN: click a triplet -> toggle its sid in the store
+    @app.callback(
+        Output('train-image-selected-ids', 'data', allow_duplicate=True),
+        Input({'type': 'sample-img', 'origin': 'train', 'sid': ALL}, 'n_clicks'),
+        State('train-image-selected-ids', 'data'),
+        prevent_initial_call=True
+    )
+    def on_train_image_click(n_clicks_list, current_ids):
+        if not n_clicks_list or not any(n_clicks_list):
+            return dash.no_update
+        trig = ctx.triggered_id   # {'type':'sample-img','origin':'train','sid':...}
+        if not trig or 'sid' not in trig:
+            return dash.no_update
+        sid = int(trig['sid'])
+        current_ids = current_ids or []
+        if sid in current_ids:
+            return [x for x in current_ids if x != sid]
+        return current_ids + [sid]
 
+
+    # TRAIN: store -> table.selected_rows (map by SampleId over current data)
+    @app.callback(
+        Output('train-data-table', 'selected_rows', allow_duplicate=True),
+        Input('train-image-selected-ids', 'data'),
+        State('train-data-table', 'data'),
+        prevent_initial_call=True
+    )
+    def restore_train_selected_rows(selected_ids, data):
+        if not selected_ids or not data:
+            return []
+        id2idx = {row['SampleId']: idx for idx, row in enumerate(data)}
+        return [id2idx[sid] for sid in selected_ids if sid in id2idx]
+
+
+    # EVAL: same wiring
+    @app.callback(
+        Output('eval-image-selected-ids', 'data', allow_duplicate=True),
+        Input({'type': 'sample-img', 'origin': 'eval', 'sid': ALL}, 'n_clicks'),
+        State('eval-image-selected-ids', 'data'),
+        prevent_initial_call=True
+    )
+    def on_eval_image_click(n_clicks_list, current_ids):
+        if not n_clicks_list or not any(n_clicks_list):
+            return dash.no_update
+        trig = ctx.triggered_id
+        if not trig or 'sid' not in trig:
+            return dash.no_update
+        sid = int(trig['sid'])
+        current_ids = current_ids or []
+        if sid in current_ids:
+            return [x for x in current_ids if x != sid]
+        return current_ids + [sid]
+
+
+    @app.callback(
+        Output('eval-data-table', 'selected_rows', allow_duplicate=True),
+        Input('eval-image-selected-ids', 'data'),
+        State('eval-data-table', 'data'),
+        prevent_initial_call=True
+    )
+    def restore_eval_selected_rows(selected_ids, data):
+        if not selected_ids or not data:
+            return []
+        id2idx = {row['SampleId']: idx for idx, row in enumerate(data)}
+        return [id2idx[sid] for sid in selected_ids if sid in id2idx]
 
     @app.callback(
         Output('train-data-table', 'data', allow_duplicate=True),
