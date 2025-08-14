@@ -2669,33 +2669,35 @@ def main():
         Output('train-sample-panel', 'children', allow_duplicate=True),
         Output('eval-sample-panel', 'children', allow_duplicate=True),
         Input('train-data-table', 'derived_viewport_data'),
-        Input('train-data-table', 'selected_rows'),
+        Input('train-data-table', 'derived_viewport_selected_rows'),
         Input('eval-data-table', 'derived_viewport_data'),
-        Input('eval-data-table', 'selected_rows'),
+        Input('eval-data-table', 'derived_viewport_selected_rows'),
         Input('sample-inspect-checkboxes', 'value'),
         Input('eval-sample-inspect-checkboxes', 'value'),
         Input('data-tabs', 'value'),
         prevent_initial_call=True
     )
     def render_samples(
-        train_viewport, train_selected_rows,
-        eval_viewport, eval_selected_rows,
+        train_viewport, train_viewport_sel,
+        eval_viewport, eval_viewport_sel,
         train_flags, eval_flags,
         tab
     ):
         panels = [no_update, no_update]
         nonlocal ui_state, stub
         if tab == 'train' and 'inspect_sample_on_click' in train_flags and train_viewport:
-            df = ui_state.samples_df
-            ids = [row['SampleId'] for row in train_viewport if row['SampleId'] in df['SampleId'].values]
-            selected_ids = set(df.iloc[i]['SampleId'] for i in train_selected_rows or [])
-            discarded_ids = set(df.loc[df['Discarded'], 'SampleId'])
+            ids = [row['SampleId'] for row in train_viewport]
+            selected_ids = set(
+                train_viewport[i]['SampleId'] for i in (train_viewport_sel or []) if 0 <= i < len(train_viewport)
+            )
+            discarded_ids = set(ui_state.samples_df.loc[ui_state.samples_df['Discarded'], 'SampleId'])
             panels[0] = render_images(ui_state, stub, ids, selected_ids, origin='train', discarded_ids=discarded_ids)
         elif tab == 'eval' and 'inspect_sample_on_click' in eval_flags and eval_viewport:
-            df = ui_state.eval_samples_df
-            ids = [row['SampleId'] for row in eval_viewport if row['SampleId'] in df['SampleId'].values]
-            selected_ids = set(df.iloc[i]['SampleId'] for i in eval_selected_rows or [])
-            discarded_ids = set(df.loc[df['Discarded'], 'SampleId'])
+            ids = [row['SampleId'] for row in eval_viewport]
+            selected_ids = set(
+                eval_viewport[i]['SampleId'] for i in (eval_viewport_sel or []) if 0 <= i < len(eval_viewport)
+            )
+            discarded_ids = set(ui_state.eval_samples_df.loc[ui_state.eval_samples_df['Discarded'], 'SampleId'])
             panels[1] = render_images(ui_state, stub, ids, selected_ids, origin='eval', discarded_ids=discarded_ids)
         return panels
 
@@ -2733,14 +2735,15 @@ def main():
     
     @app.callback(
         Output('train-image-selected-ids', 'data'),
-        Input('train-data-table', 'selected_rows'),
-        State('train-data-table', 'data'),
+        Input('train-data-table', 'derived_viewport_selected_rows'),
+        State('train-data-table', 'derived_viewport_data'),
         prevent_initial_call=True
     )
-    def store_selected_sample_ids(selected_rows, data):
-        if not selected_rows or not data:
+    def store_selected_sample_ids(view_sel_rows, viewport_data):
+        if not view_sel_rows or not viewport_data:
             return []
-        return [data[i]['SampleId'] for i in selected_rows]
+        return [viewport_data[i]['SampleId'] for i in view_sel_rows if 0 <= i < len(viewport_data)]
+
 
     @app.callback(
         Output('train-data-table', 'selected_rows', allow_duplicate=True),
@@ -2756,13 +2759,13 @@ def main():
 
     @app.callback(
         Output('train-data-table', 'style_data_conditional'),
-        Input('train-data-table', 'selected_rows'),
-        State('train-data-table', 'data')
+        Input('train-data-table', 'derived_viewport_selected_rows'),
+        State('train-data-table', 'derived_viewport_data')
     )
-    def highlight_selected(selected_rows, data):
-        if not selected_rows or not data:
+    def highlight_selected(view_sel_rows, viewport_data):
+        if not view_sel_rows or not viewport_data:
             return []
-        sample_ids = [data[i]['SampleId'] for i in selected_rows]
+        sample_ids = [viewport_data[i]['SampleId'] for i in view_sel_rows if 0 <= i < len(viewport_data)]
         filter_query = ' || '.join([f'{{SampleId}} = {sid}' for sid in sample_ids])
         return [{
             "if": {"filter_query": filter_query},
