@@ -2634,36 +2634,6 @@ def main():
 
         return style
 
-    # @app.callback(
-    #     Output('data-panel-col1', 'children', allow_duplicate=True),
-    #     Input('train-data-table', 'selected_rows'),
-    #     State('train-data-table', 'data'),
-    #     State('sample-inspect-checkboxes', 'value'),
-    # )
-    # def render_data_sample(selected_rows, data, inspect_checkboxes):
-    #     if selected_rows is None or len(selected_rows) == 0 or \
-    #             len(inspect_checkboxes) == 0:
-    #         return []
-
-    #     # Get the selected row's data
-    #     selected_row_index = selected_rows[-1]
-    #     row = data[selected_row_index]
-    #     selected_sample_id = row["SampleId"]
-    #     request = pb2.SampleRequest(
-    #         sample_id=selected_sample_id, origin="train")
-    #     response = stub.GetSample(request)
-
-    #     image_base64 = base64.b64encode(response.data).decode('utf-8')
-
-    #     return html.Img(
-    #         src=f'data:image/png;base64,{image_base64}',
-    #         style={
-    #             'width': '18vw',
-    #             'height': '18vh',
-    #             'marginTop': '10vh',
-    #         }
-    #     )
-
     @app.callback(
         Output('train-data-table', 'page_size'),
         Input('grid-preset-dropdown', 'value')
@@ -2680,8 +2650,8 @@ def main():
 
 
     @app.callback(
-        Output('train-sample-panel', 'children', allow_duplicate=True),
-        Output('eval-sample-panel', 'children', allow_duplicate=True),
+        Output('train-sample-panel', 'children'),
+        Output('eval-sample-panel', 'children'),
         Input('train-data-table', 'derived_viewport_data'),
         Input('train-data-table', 'derived_viewport_selected_rows'),
         Input('eval-data-table', 'derived_viewport_data'),
