@@ -16,12 +16,12 @@ from collections import defaultdict
 from torchvision import transforms
 from scope_timer import ScopeTimer
 
-# from fashion_mnist_exp import get_exp
+from fashion_mnist_exp import get_exp
 
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
 # from imagenet_exp import get_exp
-from imagenet_exp_deep import get_exp
+# from imagenet_exp_deep import get_exp
 # from imagenet_convnext import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
@@ -276,6 +276,22 @@ def load_raw_image(dataset, index):
 
     else:
         raise ValueError("Dataset type not supported for raw image extraction.")
+
+
+def _get_input_tensor_for_sample(dataset, sample_id):
+    if hasattr(dataset, "_getitem_raw"):
+        tensor, _, _ = dataset._getitem_raw(sample_id)
+    else:
+        tensor, _ = dataset[sample_id]
+
+    if not isinstance(tensor, torch.Tensor):
+        tensor = torch.tensor(tensor)
+
+    if tensor.ndim == 3:
+        tensor = tensor.unsqueeze(0) 
+    elif tensor.ndim == 1:
+        tensor = tensor.unsqueeze(0)
+    return tensor
 
 
 class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
@@ -669,12 +685,73 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         answer.weights.extend(weights)
 
         return answer
+        
+    def GetActivations(self, request, context):
+        """
+        Returns pre-activation outputs for the requested layer & sample.
+        """
+        try:
+            ds = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
+        except Exception:
+            ds = experiment.train_loader.dataset
+
+        sid = int(request.sample_id)
+        if sid < 0 or sid >= len(ds):
+            return pb2.ActivationResponse(layer_type="", neurons_count=0)
+
+        x = _get_input_tensor_for_sample(ds, sid)
+
+        layer = experiment.model.get_layer_by_id(int(request.layer_id))
+        layer_type = layer.__class__.__name__
+        captured = {}
+
+        def hook(module, inputs, output):
+            captured['y'] = output.detach().cpu()
+
+        handle = layer.register_forward_hook(hook)
+        try:
+            with torch.no_grad():
+                _ = experiment.model.forward(x)
+        finally:
+            handle.remove()
+
+        y = captured.get('y', None)
+        if y is None:
+            return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
+
+        y_np = y.numpy()
+        resp = pb2.ActivationResponse(layer_type=layer_type)
+
+        if "Conv2d" in layer_type:
+            # (B, C, H, W)
+            if y_np.ndim != 4:
+                return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
+            _, C, H, W = y_np.shape
+            resp.neurons_count = int(C)
+            for c in range(C):
+                vals = y_np[0, c].astype(np.float32).reshape(-1).tolist()
+                amap = pb2.ActivationMap(neuron_id=c, values=vals, H=H, W=W)
+                resp.activations.append(amap)
+        else:
+            # (B, N)
+            if y_np.ndim != 2:
+                return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
+            _, N = y_np.shape
+            resp.neurons_count = int(N)
+            for n in range(N):
+                vals = y_np[0].astype(np.float32).tolist() 
+                v = float(y_np[0, n])
+                amap = pb2.ActivationMap(neuron_id=n, values=[v], H=1, W=1)
+                resp.activations.append(amap)
+
+        return resp
+
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=6))
     servicer = ExperimentServiceServicer()
     pb2_grpc.add_ExperimentServiceServicer_to_server(servicer, server)
-    server.add_insecure_port('[::]:50051')
+    server.add_insecure_port('[::]:50052')
     server.start()
     # experiment.toggle_training_status()
     server.wait_for_termination()

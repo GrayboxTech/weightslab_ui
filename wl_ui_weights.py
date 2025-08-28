@@ -8,7 +8,8 @@ import time
 import argparse
 import collections
 import pandas as pd
-
+import plotly.graph_objs as go
+import numpy as np
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 from weights_lab import (
@@ -31,7 +32,7 @@ def parse_args():
     return parser.parse_args()
 
 args = parse_args()
-channel = grpc.insecure_channel('localhost:50051')
+channel = grpc.insecure_channel('localhost:50052')
 stub = pb2_grpc.ExperimentServiceStub(channel)
 ui_state = UIState(args.root_directory)
 
@@ -73,6 +74,12 @@ app.layout = html.Div([
     html.H1("Model Architecture", style={'textAlign': 'center'}),
     get_header_hyper_params_div(ui_state),
     get_weights_div(ui_state),
+    html.Div(
+        id='heatmaps-gallery',
+        children=[],
+        style={'display': 'none', 'padding': '6px 10px', 'maxHeight': '75vh', 'overflowY': 'auto'}
+    ),
+
 ])
 
 def _get_next_layer_id(curr_layer_id: int) -> int | None:
@@ -89,6 +96,19 @@ def _get_incoming_count(layer_id: int) -> int | None:
         val = int(row['incoming'])
         return val
     return None
+
+def _make_heatmap_figure(z, zmin=None, zmax=None):
+    return go.Figure(
+        data=[go.Heatmap(
+            z=z, zmid=0, zmin=zmin, zmax=zmax,
+            colorscale=[[0.0, 'red'], [0.5, 'white'], [1.0, 'green']],
+            showscale=False
+        )]
+    ).update_layout(
+        margin=dict(l=2, r=2, t=2, b=2),
+        xaxis_showgrid=False, yaxis_showgrid=False,
+        xaxis_visible=False, yaxis_visible=False,
+    )
 
 @app.callback(
     Output('resume-pause-train-btn', 'children', allow_duplicate=True),
@@ -401,6 +421,78 @@ def run_query_on_neurons(_, query, weight, action, zerofy_opts):
                 get_interactive_layers=True,
             ))
         )
+
+@app.callback(
+    Output('heatmaps-gallery', 'children'),
+    Output('heatmaps-gallery', 'style'),
+    Input('weights-render-freq', 'n_intervals'),
+    Input('neuron_stats-checkboxes', 'value'),
+)
+def render_pre_activation_heatmaps(_, checklist_values):
+    values = checklist_values or []
+    show_heatmaps = 'show_heatmaps' in values
+    if not show_heatmaps:
+        return dash.no_update, {'display': 'none'}
+
+    sample_id = 0
+    origin = "eval"
+
+    layers_df = ui_state.get_layers_df().sort_values("layer_id")
+    gallery_children = []
+
+    for _, layer_row in layers_df.iterrows():
+        layer_id = int(layer_row['layer_id'])
+        layer_name = str(layer_row.get('layer_name', layer_row.get('layer_type', 'Layer')))
+
+        resp = stub.GetActivations(pb2.ActivationRequest(
+            layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
+        ))
+
+        graphs = []
+        if resp.neurons_count > 0:
+            to_draw = resp.neurons_count
+
+            if "Conv2d" in (resp.layer_type or ""):
+                for i in range(to_draw):
+                    amap = resp.activations[i]
+                    vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
+                    max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
+                    fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
+                    graphs.append(html.Div(
+                        dcc.Graph(figure=fig, config={'displayModeBar': False},
+                                  style={'height': '120px', 'width': '120px'}),
+                        style={'display': 'inline-block'}
+                    ))
+            else:       
+                scalars = np.array([resp.activations[i].values[0] for i in range(to_draw)], dtype=float)
+                max_abs = float(np.max(np.abs(scalars))) if scalars.size else 1.0
+                for v in scalars:
+                    fig = _make_heatmap_figure([[v]], zmin=-max_abs, zmax=+max_abs)
+                    graphs.append(html.Div(
+                        dcc.Graph(figure=fig, config={'displayModeBar': False},
+                                  style={'height': '60px', 'width': '60px'}),
+                        style={'display': 'inline-block'}
+                    ))
+
+        layer_block = html.Div([
+            html.H5(f"Layer {layer_id}: {layer_name}", style={'margin': '0 0 6px 0'}),
+            html.Div(
+                graphs,
+                style={
+                    'display': 'grid',
+                    'flexDirection': 'column',
+                    'gap': '8px',
+                    'maxHeight': '420px',    
+                    'overflowY': 'auto',
+                    'paddingRight': '6px'
+                }
+            )
+        ], style={'marginBottom': '12px','border': '1px solid #eee','padding': '8px','borderRadius': '6px'})
+
+        gallery_children.append(layer_block)
+
+    return gallery_children, {'display': 'block', 'padding': '6px 10px'}
+
 
 
 if __name__ == '__main__':

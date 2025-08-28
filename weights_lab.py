@@ -1207,6 +1207,7 @@ def stats_display_checklist(ui_state: UIState):
             {'label': 'Absolute Difference between rates', 'value': 'abs_diff'},
             {'label': 'Relative Difference between rates', 'value': 'rel_diff'},
             {'label': 'Health State', 'value': 'status'},
+            {'label': 'Show activation heatmaps', 'value': 'show_heatmaps'},
         ],
         value=['neuron_id', 'neuron_age', 'trigger_rate_train', 'status'],
         inline=True,
