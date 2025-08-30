@@ -649,7 +649,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
     def GetWeights(self, request, context):
         # print(f"ExperimentServiceServicer.GetWeights({request})")
-        answer = pb2.WeightsResponse(success=True, error_messages="")
+        answer = pb2.WeightsResponse(success=True, error_message="")
 
         neuron_id = request.neuron_id
         layer = None
@@ -660,7 +660,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             answer.error_messages = str(e)
             return answer
 
-        answer.neuron_id = request.neuron_id
+        #answer.neuron_id = request.neuron_id
+        answer.neuron_id.CopyFrom(request.neuron_id)
         answer.layer_name = layer.__class__.__name__
         answer.incoming = layer.incoming_neuron_count
         answer.outgoing = layer.neuron_count
@@ -678,18 +679,15 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
         if neuron_id.neuron_id < 0:
             # Return all weights
-            weights = layer.weights.data.cpu().detach().numpy().flatten()
+            weights = layer.weight.data.cpu().detach().numpy().flatten()
         else:
-            weights = layer.weights[
+            weights = layer.weight[
                 neuron_id.neuron_id].data.cpu().detach().numpy().flatten()
         answer.weights.extend(weights)
 
         return answer
         
     def GetActivations(self, request, context):
-        """
-        Returns pre-activation outputs for the requested layer & sample.
-        """
         try:
             ds = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
         except Exception:
@@ -700,31 +698,44 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             return pb2.ActivationResponse(layer_type="", neurons_count=0)
 
         x = _get_input_tensor_for_sample(ds, sid)
+        layer_id = int(request.layer_id)
 
-        layer = experiment.model.get_layer_by_id(int(request.layer_id))
-        layer_type = layer.__class__.__name__
-        captured = {}
-
-        def hook(module, inputs, output):
-            captured['y'] = output.detach().cpu()
-
-        handle = layer.register_forward_hook(hook)
+        intermediaries = {}
         try:
             with torch.no_grad():
-                _ = experiment.model.forward(x)
-        finally:
-            handle.remove()
+                _ = experiment.model.forward(x, intermediary=intermediaries)
+        except TypeError:
+            try:
+                with torch.no_grad():
+                    _, intermediaries = experiment.model.forward(x, intermediary_outputs=[layer_id])
+            except Exception:
+                captured = {}
+                layer = experiment.model.get_layer_by_id(layer_id)
+                def hook(module, inputs, output):
+                    captured['y'] = output.detach().cpu()
+                handle = layer.register_forward_hook(hook)
+                try:
+                    with torch.no_grad():
+                        _ = experiment.model.forward(x)
+                    if 'y' in captured:
+                        intermediaries[layer_id] = captured['y']
+                finally:
+                    handle.remove()
 
-        y = captured.get('y', None)
-        if y is None:
-            return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
+        if layer_id not in intermediaries:
+            return pb2.ActivationResponse(layer_type="", neurons_count=0)
 
+        y = intermediaries[layer_id]
+        if hasattr(y, "detach"):
+            y = y.detach().cpu()
         y_np = y.numpy()
+
+        layer = experiment.model.get_layer_by_id(layer_id)
+        layer_type = layer.__class__.__name__
         resp = pb2.ActivationResponse(layer_type=layer_type)
 
         if "Conv2d" in layer_type:
-            # (B, C, H, W)
-            if y_np.ndim != 4:
+            if y_np.ndim != 4:  # (B, C, H, W)
                 return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
             _, C, H, W = y_np.shape
             resp.neurons_count = int(C)
@@ -733,13 +744,11 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 amap = pb2.ActivationMap(neuron_id=c, values=vals, H=H, W=W)
                 resp.activations.append(amap)
         else:
-            # (B, N)
-            if y_np.ndim != 2:
+            if y_np.ndim != 2:  # (B, N)
                 return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
             _, N = y_np.shape
             resp.neurons_count = int(N)
             for n in range(N):
-                vals = y_np[0].astype(np.float32).tolist() 
                 v = float(y_np[0, n])
                 amap = pb2.ActivationMap(neuron_id=n, values=[v], H=1, W=1)
                 resp.activations.append(amap)

@@ -1150,6 +1150,14 @@ def get_layer_div(
                     },
                 ],
             ),
+
+            html.Div(
+                id={'type': 'layer-heatmap', 'layer_id': int(layer_row['layer_id'])},
+                children=[],
+                style={'display': 'none', 'marginTop': '8px'}
+            ),
+
+            
             get_layer_ops_buttons(layer_row['layer_id']),
         ],
         style={

@@ -73,13 +73,7 @@ app.layout = html.Div([
     dcc.Interval(id='weights-render-freq', interval=5000, n_intervals=0),
     html.H1("Model Architecture", style={'textAlign': 'center'}),
     get_header_hyper_params_div(ui_state),
-    get_weights_div(ui_state),
-    html.Div(
-        id='heatmaps-gallery',
-        children=[],
-        style={'display': 'none', 'padding': '6px 10px', 'maxHeight': '75vh', 'overflowY': 'auto'}
-    ),
-
+    get_weights_div(ui_state)
 ])
 
 def _get_next_layer_id(curr_layer_id: int) -> int | None:
@@ -109,6 +103,32 @@ def _make_heatmap_figure(z, zmin=None, zmax=None):
         xaxis_showgrid=False, yaxis_showgrid=False,
         xaxis_visible=False, yaxis_visible=False,
     )
+
+def _get_conv_filters_for_layer(layer_id: int):
+
+    try:
+        resp = stub.GetWeights(pb2.WeigthsRequest(
+            neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
+        ))
+    except Exception as e:
+        return None, {"error": f"RPC error: {e}"}
+
+    if not resp.success:
+        return None, {"error": getattr(resp, "error_message", "Unknown error")}
+
+    C_in = int(resp.incoming)
+    C_out = int(resp.outgoing)
+    K = int(resp.kernel_size or 0)
+
+    w = np.array(resp.weights, dtype=float)
+    expected = C_out * C_in * K * K
+    if K <= 0 or w.size != expected:
+        return None, {"error": f"Unexpected weight shape: got {w.size}, expected {expected} (C_out={C_out}, C_in={C_in}, K={K})"}
+
+    w = w.reshape(C_out, C_in, K, K)      # (out, in, K, K)
+    filters = w.mean(axis=1)               # (out, K, K) — mean over input channels
+    return filters, {"layer_type": "Conv2d", "C_in": C_in, "C_out": C_out, "K": K}
+
 
 @app.callback(
     Output('resume-pause-train-btn', 'children', allow_duplicate=True),
@@ -422,76 +442,150 @@ def run_query_on_neurons(_, query, weight, action, zerofy_opts):
             ))
         )
 
+# @app.callback(
+#     Output('heatmaps-gallery', 'children'),
+#     Output('heatmaps-gallery', 'style'),
+#     Input('weights-render-freq', 'n_intervals'),
+#     Input('neuron_stats-checkboxes', 'value'),
+# )
+# def render_pre_activation_heatmaps(_, checklist_values):
+#     values = checklist_values or []
+#     show_heatmaps = 'show_heatmaps' in values
+#     if not show_heatmaps:
+#         return dash.no_update, {'display': 'none'}
+
+#     sample_id = 0
+#     origin = "eval"
+
+#     layers_df = ui_state.get_layers_df().sort_values("layer_id")
+#     gallery_children = []
+
+#     for _, layer_row in layers_df.iterrows():
+#         layer_id = int(layer_row['layer_id'])
+#         layer_name = str(layer_row.get('layer_name', layer_row.get('layer_type', 'Layer')))
+
+#         resp = stub.GetActivations(pb2.ActivationRequest(
+#             layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
+#         ))
+
+#         graphs = []
+#         if resp.neurons_count > 0:
+#             to_draw = resp.neurons_count
+
+#             if "Conv2d" in (resp.layer_type or ""):
+#                 for i in range(to_draw):
+#                     amap = resp.activations[i]
+#                     vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
+#                     max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
+#                     fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
+#                     graphs.append(html.Div(
+#                         dcc.Graph(figure=fig, config={'displayModeBar': False},
+#                                   style={'height': '120px', 'width': '120px'}),
+#                         style={'display': 'inline-block'}
+#                     ))
+#             else:       
+#                 scalars = np.array([resp.activations[i].values[0] for i in range(to_draw)], dtype=float)
+#                 max_abs = float(np.max(np.abs(scalars))) if scalars.size else 1.0
+#                 for v in scalars:
+#                     fig = _make_heatmap_figure([[v]], zmin=-max_abs, zmax=+max_abs)
+#                     graphs.append(html.Div(
+#                         dcc.Graph(figure=fig, config={'displayModeBar': False},
+#                                   style={'height': '60px', 'width': '60px'}),
+#                         style={'display': 'inline-block'}
+#                     ))
+
+#         layer_block = html.Div([
+#             html.H5(f"Layer {layer_id}: {layer_name}", style={'margin': '0 0 6px 0'}),
+#             html.Div(
+#                 graphs,
+#                 style={
+#                     'display': 'grid',
+#                     'flexDirection': 'column',
+#                     'gap': '8px',
+#                     'maxHeight': '420px',    
+#                     'overflowY': 'auto',
+#                     'paddingRight': '6px'
+#                 }
+#             )
+#         ], style={'marginBottom': '12px','border': '1px solid #eee','padding': '8px','borderRadius': '6px'})
+
+#         gallery_children.append(layer_block)
+
+#     return gallery_children, {'display': 'block', 'padding': '6px 10px'}
+
 @app.callback(
-    Output('heatmaps-gallery', 'children'),
-    Output('heatmaps-gallery', 'style'),
+    Output('activation-sample-id', 'max'),
+    Output('activation-sample-count', 'children'),
+    Input('activation-origin', 'value'),
+)
+def update_sample_bounds(origin):
+    try:
+        resp = stub.ExperimentCommand(pb2.TrainerCommand(get_data_records=origin))
+        n = int(resp.sample_statistics.sample_count or 0)
+        max_id = max(n - 1, 0)
+        return max_id, f"ID range: 0–{max_id} ({origin})"
+    except Exception as e:
+        return no_update, f"(couldn’t fetch sample count: {e})"
+
+@app.callback(
+    Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'children'),
+    Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'style'),
     Input('weights-render-freq', 'n_intervals'),
     Input('neuron_stats-checkboxes', 'value'),
+    State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
 )
-def render_pre_activation_heatmaps(_, checklist_values):
+def render_layer_heatmap(_, checklist_values, heatmap_id):
     values = checklist_values or []
-    show_heatmaps = 'show_heatmaps' in values
-    if not show_heatmaps:
+    if 'show_heatmaps' not in values:
         return dash.no_update, {'display': 'none'}
 
-    sample_id = 0
-    origin = "eval"
+    layer_id = int(heatmap_id['layer_id'])
 
-    layers_df = ui_state.get_layers_df().sort_values("layer_id")
-    gallery_children = []
+    # Pull filters directly from weights
+    filters, meta = _get_conv_filters_for_layer(layer_id)
+    if filters is None:
+        # Not a conv layer or error — show a small message block
+        msg = meta.get("error", "No filters to display")
+        block = html.Div(
+            [html.Small(msg)],
+            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'}
+        )
+        return [block], {'display': 'block'}
 
-    for _, layer_row in layers_df.iterrows():
-        layer_id = int(layer_row['layer_id'])
-        layer_name = str(layer_row.get('layer_name', layer_row.get('layer_type', 'Layer')))
+    graphs = []
+    # One heatmap per output channel (filter)
+    for f in filters:
+        # f is (K, K)
+        max_abs = float(np.max(np.abs(f))) if f.size else 1.0
+        fig = _make_heatmap_figure(f, zmin=-max_abs, zmax=+max_abs)
+        graphs.append(
+            html.Div(
+                dcc.Graph(
+                    figure=fig,
+                    config={'displayModeBar': False},
+                    style={'height': '120px', 'width': '120px'}
+                ),
+                style={'display': 'inline-block'}
+            )
+        )
 
-        resp = stub.GetActivations(pb2.ActivationRequest(
-            layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
-        ))
-
-        graphs = []
-        if resp.neurons_count > 0:
-            to_draw = resp.neurons_count
-
-            if "Conv2d" in (resp.layer_type or ""):
-                for i in range(to_draw):
-                    amap = resp.activations[i]
-                    vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
-                    max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
-                    fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
-                    graphs.append(html.Div(
-                        dcc.Graph(figure=fig, config={'displayModeBar': False},
-                                  style={'height': '120px', 'width': '120px'}),
-                        style={'display': 'inline-block'}
-                    ))
-            else:       
-                scalars = np.array([resp.activations[i].values[0] for i in range(to_draw)], dtype=float)
-                max_abs = float(np.max(np.abs(scalars))) if scalars.size else 1.0
-                for v in scalars:
-                    fig = _make_heatmap_figure([[v]], zmin=-max_abs, zmax=+max_abs)
-                    graphs.append(html.Div(
-                        dcc.Graph(figure=fig, config={'displayModeBar': False},
-                                  style={'height': '60px', 'width': '60px'}),
-                        style={'display': 'inline-block'}
-                    ))
-
-        layer_block = html.Div([
-            html.H5(f"Layer {layer_id}: {layer_name}", style={'margin': '0 0 6px 0'}),
+    block = html.Div(
+        [
             html.Div(
                 graphs,
                 style={
                     'display': 'grid',
-                    'flexDirection': 'column',
                     'gap': '8px',
-                    'maxHeight': '420px',    
+                    'maxHeight': '420px',
                     'overflowY': 'auto',
                     'paddingRight': '6px'
                 }
             )
-        ], style={'marginBottom': '12px','border': '1px solid #eee','padding': '8px','borderRadius': '6px'})
+        ],
+        style={'borderTop': '1px solid #eee', 'paddingTop': '6px'}
+    )
+    return [block], {'display': 'block'}
 
-        gallery_children.append(layer_block)
-
-    return gallery_children, {'display': 'block', 'padding': '6px 10px'}
 
 
 
