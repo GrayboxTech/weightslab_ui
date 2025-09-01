@@ -35,7 +35,7 @@ import collections
 import numpy as np
 
 from collections import defaultdict
-
+from dash import dash_table
 from dash.dash_table.Format import Format, Scheme
 from scope_timer import ScopeTimer
 from dataclasses import dataclass
@@ -1099,65 +1099,55 @@ def get_layer_div(
             html.H3(heading, style={'textAlign': 'center'}),
             html.H4(
                 id={"type": "layer-sub-heading", "layer_id": layer_row['layer_id']},
-                children=sub_heading, style={'textAlign': 'center'}),
-            dash_table.DataTable(
-                id={"type": "layer-data-table", "layer_id": layer_row['layer_id']},
-                data=neurons_view_df.to_dict("records"),
-                columns=[
-                    {"name": col, "id": col}
-                    for col in neurons_view_df.columns],
-                sort_action="native",
-                row_selectable='single',
-                style_table={
-                    "maxHeight": "300px",
-                    "overflowY": "scroll"
-                },
-                style_cell={
-                    "minWidth": "60px",
-                    "width": "60px",
-                    "maxWidth": f"{WIDTH_PER_COLUMN}px"
-                },
-                style_data={"whiteSpace": "normal", "height": "auto"},
-                style_data_conditional=[
-                    {
-                        "if": {"filter_query": "{Status} = 'OVRFT'"},
-                        "color": "red",  # Text color for 'OVERFIT'
-                        "fontWeight": "bold",
-                    },
-                    {
-                        "if": {"filter_query": "{Status} = 'BAD'"},
-                        "color": "orange",  # Text color for 'BAD'
-                    },
-                    {
-                        "if": {"filter_query": "{Status} = 'GREAT'"},
-                        "color": "green",  # Text color for 'GREAT'
-                        "fontWeight": "bold",
-                    },
-                    {
-                        "if": {"filter_query": "{Status} = 'DEAD'"},
-                        "color": "black",  # Text color for 'DEAD'
-                        "backgroundColor": "#e0e0e0",  # Light gray background for DEAD
-                    },
-                    {
-                        "if": {"filter_query": "{Status} = 'FROZEN'"},
-                        "color": "#B7C9E2",  # Text color for 'FROZEN'
-                        # "backgroundColor": "#B7C9E2"
-                    },
-                    {
-                        "if": {"filter_query": "{Status} = 'N/A'"},
-                        "color": "#a0a0a0",  # Text color for 'N/A'
-                        "fontStyle": "italic",
-                    },
-                ],
+                children=sub_heading, style={'textAlign': 'center'}
             ),
 
             html.Div(
-                id={'type': 'layer-heatmap', 'layer_id': int(layer_row['layer_id'])},
-                children=[],
-                style={'display': 'none', 'marginTop': '8px'}
+                children=[
+                    dash_table.DataTable(
+                        id={"type": "layer-data-table", "layer_id": layer_row['layer_id']},
+                        data=neurons_view_df.to_dict("records"),
+                        columns=[{"name": col, "id": col} for col in neurons_view_df.columns],
+                        sort_action="native",
+                        row_selectable='single',
+                        style_table={"maxHeight": "300px", "overflowY": "scroll"},
+                        style_cell={"minWidth": "60px", "width": "60px", "maxWidth": f"{WIDTH_PER_COLUMN}px"},
+                        style_data={"whiteSpace": "normal", "height": "auto"},
+                        style_data_conditional=[ 
+                            {"if": {"filter_query": "{Status} = 'OVRFT'"}, "color": "red", "fontWeight": "bold"},
+                            {"if": {"filter_query": "{Status} = 'BAD'"}, "color": "orange"},
+                            {"if": {"filter_query": "{Status} = 'GREAT'"}, "color": "green", "fontWeight": "bold"},
+                            {"if": {"filter_query": "{Status} = 'DEAD'"}, "color": "black", "backgroundColor": "#e0e0e0"},
+                            {"if": {"filter_query": "{Status} = 'FROZEN'"}, "color": "#B7C9E2"},
+                            {"if": {"filter_query": "{Status} = 'N/A'"}, "color": "#a0a0a0", "fontStyle": "italic"},
+                        ],
+                    ),
+
+                    html.Div(
+                        id={'type': 'layer-side-panel', 'layer_id': int(layer_row['layer_id'])},
+                        children=[
+                            html.Div(
+                                id={'type': 'layer-activation', 'layer_id': int(layer_row['layer_id'])},
+                                children=[],
+                                style={'display': 'none', 'marginBottom': '8px'}
+                            ),
+                            html.Div(
+                                id={'type': 'layer-heatmap', 'layer_id': int(layer_row['layer_id'])},
+                                children=[],
+                                style={'display': 'none'}
+                            ),
+                        ],
+                        style={
+                            'display': 'none',
+                            'marginLeft': '10px',
+                            'maxHeight': '300px',  
+                            'overflowY': 'auto'    
+                        }
+                    ),
+                ],
+                style={'display': 'flex', 'alignItems': 'flex-start'}
             ),
 
-            
             get_layer_ops_buttons(layer_row['layer_id']),
         ],
         style={
@@ -1215,7 +1205,8 @@ def stats_display_checklist(ui_state: UIState):
             {'label': 'Absolute Difference between rates', 'value': 'abs_diff'},
             {'label': 'Relative Difference between rates', 'value': 'rel_diff'},
             {'label': 'Health State', 'value': 'status'},
-            {'label': 'Show activation heatmaps', 'value': 'show_heatmaps'},
+            {'label': 'Show activation maps', 'value': 'show_activation_maps'},
+            {'label': 'Show filter/weights', 'value': 'show_filter_heatmaps'},
         ],
         value=['neuron_id', 'neuron_age', 'trigger_rate_train', 'status'],
         inline=True,
@@ -1301,6 +1292,16 @@ def zerofy_checklist():
         }
     )
 
+def linear_shape_input():
+    return dbc.Col(
+        dbc.Input(
+            id='linear-incoming-shape',
+            type='text',
+            placeholder='Linear input CxHxW (e.g. 3x5x5)',
+            style={'width': '14vw'}
+        ),
+        style={'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center'}
+    )
 
 
 def get_weights_div(ui_state: UIState):
@@ -1308,6 +1309,7 @@ def get_weights_div(ui_state: UIState):
         id="model-architecture-div",
         children=[
             stats_display_checklist(ui_state),
+            linear_shape_input(),
             zerofy_checklist(),
             interactable_layers(ui_state),
             get_neuron_query_input_div(ui_state),
@@ -1315,6 +1317,39 @@ def get_weights_div(ui_state: UIState):
         ],
     )
 
+def _downsample_strip(z_1xN: np.ndarray, max_len: int = 256) -> np.ndarray:
+    N = z_1xN.shape[1]
+    if N <= max_len:
+        return z_1xN
+    bucket = int(np.ceil(N / max_len))
+    trim = (N // bucket) * bucket
+    if trim == 0:
+        return z_1xN
+    v = z_1xN[0, :trim].reshape(-1, bucket).mean(axis=1)
+    return v.reshape(1, -1)
+
+def _parse_chw(s):
+        if not s or not isinstance(s, str):
+            return None
+        import re
+        m = re.match(r'^\s*(\d+)\s*[x×]\s*(\d+)\s*[x×]\s*(\d+)\s*$', s, re.I)
+        if not m:
+            return None
+        C, H, W = map(int, m.groups())
+        return (C, H, W)
+
+def _make_heatmap_figure(z, zmin=None, zmax=None):
+    return go.Figure(
+        data=[go.Heatmap(
+            z=z, zmid=0, zmin=zmin, zmax=zmax,
+            colorscale=[[0.0, 'red'], [0.5, 'white'], [1.0, 'green']],
+            showscale=False
+        )]
+    ).update_layout(
+        margin=dict(l=2, r=2, t=2, b=2),
+        xaxis_showgrid=False, yaxis_showgrid=False,
+        xaxis_visible=False, yaxis_visible=False,
+    )
 
 def get_plots_div():
     experiment_checkboxes = dcc.Checklist(
@@ -2415,6 +2450,200 @@ def main():
             print(f"Weight operation request: {request}")
             response = stub.ManipulateWeights(request)
             print(f"Weight operation response: {response}")
+
+    
+    @app.callback(
+        Output({'type': 'layer-side-panel', 'layer_id': MATCH}, 'style'),
+        Input('neuron_stats-checkboxes', 'value'),
+        State({'type': 'layer-side-panel', 'layer_id': MATCH}, 'style'),
+    )
+    def toggle_side_panel(checklist_values, style):
+        values = checklist_values or []
+        show = ('show_activation_maps' in values) or ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
+        style = dict(style or {})
+        style['display'] = 'block' if show else 'none'
+        style['maxHeight'] = '300px'
+        style['overflowY'] = 'auto'
+        return style
+
+
+    @app.callback(
+        Output({'type': 'layer-activation', 'layer_id': MATCH}, 'children'),
+        Output({'type': 'layer-activation', 'layer_id': MATCH}, 'style'),
+        Input('weights-render-freq', 'n_intervals'),
+        Input('neuron_stats-checkboxes', 'value'),
+        State({'type': 'layer-activation', 'layer_id': MATCH}, 'id'),
+    )
+    def render_layer_activation(_, checklist_values, act_id):
+        values = checklist_values or []
+        if 'show_activation_maps' not in values:
+            return dash.no_update, {'display': 'none'}
+
+        layer_id = int(act_id['layer_id'])
+        sample_id, origin = 0, "eval"
+
+        resp = stub.GetActivations(pb2.ActivationRequest(
+            layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
+        ))
+
+        count = int(getattr(resp, "neurons_count", 0) or 0)
+        if count <= 0:
+            block = html.Div([html.Small("No activations available")],
+                            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+            return [block], {'display': 'block'}
+
+        graphs = []
+        if "Conv2d" in (resp.layer_type or ""):
+            for i in range(count):
+                amap = resp.activations[i]
+                vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
+                max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
+                fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
+                graphs.append(
+                    html.Div(
+                        dcc.Graph(figure=fig, config={'displayModeBar': False},
+                                style={'height': '40px', 'width': '40px'}),
+                        style={'display': 'inline-block'}
+                    )
+                )
+        else:
+            scalars = np.array([resp.activations[i].values[0] for i in range(count)], dtype=float)
+            max_abs = float(np.max(np.abs(scalars))) if scalars.size else 1.0
+            z = scalars.reshape(1, -1)  # (1, N)
+            fig = _make_heatmap_figure(z, zmin=-max_abs, zmax=+max_abs)
+            width = max(20, min(20 * z.shape[1], 600))
+            graphs.append(
+                html.Div(
+                    dcc.Graph(figure=fig, config={'displayModeBar': False},
+                            style={'height': '20px', 'width': f'{width}px'}),
+                    style={'display': 'inline-block'}
+                )
+            )
+
+        block = html.Div(
+            [
+                html.Div(
+                    graphs,
+                    style={
+                        'display': 'grid',
+                        'gap': '4px',
+                        'maxHeight': '420px',
+                        'overflowY': 'auto',
+                        'paddingRight': '6px'
+                    }
+                )
+            ],
+            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'}
+        )
+        return [block], {'display': 'block'}
+
+
+
+    @app.callback(
+        Output('activation-sample-id', 'max'),
+        Output('activation-sample-count', 'children'),
+        Input('activation-origin', 'value'),
+    )
+    def update_sample_bounds(origin):
+        try:
+            resp = stub.ExperimentCommand(pb2.TrainerCommand(get_data_records=origin))
+            n = int(resp.sample_statistics.sample_count or 0)
+            max_id = max(n - 1, 0)
+            return max_id, f"ID range: 0–{max_id} ({origin})"
+        except Exception as e:
+            return no_update, f"(couldn’t fetch sample count: {e})"
+
+    @app.callback(
+        Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'children'),
+        Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'style'),
+        Input('weights-render-freq', 'n_intervals'),
+        Input('neuron_stats-checkboxes', 'value'),
+        State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
+        Input('linear-incoming-shape', 'value'),
+    )
+
+    def render_layer_heatmap(_, checklist_values, heatmap_id, linear_shape_text):
+        values = checklist_values or []
+        if ('show_filter_heatmaps' not in values) and ('show_heatmaps' not in values):
+            return dash.no_update, {'display': 'none'}
+
+        layer_id = int(heatmap_id['layer_id'])
+
+        resp = stub.GetWeights(pb2.WeigthsRequest(
+            neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
+        ))
+
+        if not resp.success:
+            msg = getattr(resp, "error_message", "Unknown error")
+            block = html.Div([html.Small(msg)],
+                            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+            return [block], {'display': 'block'}
+
+        layer_type = (resp.layer_type or "").strip()
+        C_in, C_out = int(resp.incoming), int(resp.outgoing)
+        w = np.array(resp.weights, dtype=float)
+
+        tiles_by_neuron = []
+
+        if "Conv2d" in layer_type:
+            K = int(resp.kernel_size or 0)
+            expected = C_out * C_in * K * K
+            if K <= 0 or w.size != expected:
+                msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
+                    f"(C_out={C_out}, C_in={C_in}, K={K})")
+                block = html.Div([html.Small(msg)],
+                                style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+                return [block], {'display': 'block'}
+            w = w.reshape(C_out, C_in, K, K)
+            for out_id in range(C_out):
+                tiles_by_neuron.append([w[out_id, in_id] for in_id in range(C_in)])
+
+        else:
+            expected = C_out * C_in
+            if w.size != expected:
+                msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
+                    f"(C_out={C_out}, C_in={C_in})")
+                block = html.Div([html.Small(msg)],
+                                style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+                return [block], {'display': 'block'}
+
+            w = w.reshape(C_out, C_in)  # (out, in)
+            CHW = _parse_chw(linear_shape_text)
+            can_reshape = CHW is not None and (CHW[0] * CHW[1] * CHW[2] == C_in)
+
+            if can_reshape:
+                C, H, W = CHW
+                for out_id in range(C_out):
+                    vol = w[out_id, :].reshape(C, H, W)      # (C,H,W)
+                    tiles_by_neuron.append([vol[c] for c in range(C)])  # one H×W per input channel
+            else:
+                for out_id in range(C_out):
+                    strip = _downsample_strip(w[out_id, :].reshape(1, C_in), max_len=256)
+                    tiles_by_neuron.append([strip])
+
+        rows = []
+        for row_tiles in tiles_by_neuron:
+            row_graphs = []
+            for z in row_tiles:
+                max_abs = float(np.max(np.abs(z))) if z.size else 1.0
+                fig = _make_heatmap_figure(z, zmin=-max_abs, zmax=+max_abs)
+                if z.ndim == 2 and z.shape[0] == 1:  # strip
+                    width = max(40, min(10 * z.shape[1], 600))
+                    style = {'height': '16px', 'width': f'{width}px'}
+                else:                                 # square map (K×K or H×W)
+                    style = {'height': '36px', 'width': '36px'}
+                row_graphs.append(
+                    html.Div(dcc.Graph(figure=fig, config={'displayModeBar': False}, style=style),
+                            style={'display': 'inline-block', 'marginRight': '4px'})
+                )
+            rows.append(html.Div(row_graphs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'}))
+
+        block = html.Div(rows, style={
+            'borderTop': '1px solid #eee', 'paddingTop': '6px',
+            'maxHeight': '420px', 'overflowY': 'auto', 'paddingRight': '6px'
+        })
+        return [block], {'display': 'block'}
+
 
     @app.callback(
         Output('train-data-table', 'data'),

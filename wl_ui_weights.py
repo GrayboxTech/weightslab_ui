@@ -32,7 +32,7 @@ def parse_args():
     return parser.parse_args()
 
 args = parse_args()
-channel = grpc.insecure_channel('localhost:50052')
+channel = grpc.insecure_channel('localhost:50051')
 stub = pb2_grpc.ExperimentServiceStub(channel)
 ui_state = UIState(args.root_directory)
 
@@ -104,30 +104,26 @@ def _make_heatmap_figure(z, zmin=None, zmax=None):
         xaxis_visible=False, yaxis_visible=False,
     )
 
-def _get_conv_filters_for_layer(layer_id: int):
+def _downsample_strip(z_1xN: np.ndarray, max_len: int = 256) -> np.ndarray:
+    N = z_1xN.shape[1]
+    if N <= max_len:
+        return z_1xN
+    bucket = int(np.ceil(N / max_len))
+    trim = (N // bucket) * bucket
+    if trim == 0:
+        return z_1xN
+    v = z_1xN[0, :trim].reshape(-1, bucket).mean(axis=1)
+    return v.reshape(1, -1)
 
-    try:
-        resp = stub.GetWeights(pb2.WeigthsRequest(
-            neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
-        ))
-    except Exception as e:
-        return None, {"error": f"RPC error: {e}"}
-
-    if not resp.success:
-        return None, {"error": getattr(resp, "error_message", "Unknown error")}
-
-    C_in = int(resp.incoming)
-    C_out = int(resp.outgoing)
-    K = int(resp.kernel_size or 0)
-
-    w = np.array(resp.weights, dtype=float)
-    expected = C_out * C_in * K * K
-    if K <= 0 or w.size != expected:
-        return None, {"error": f"Unexpected weight shape: got {w.size}, expected {expected} (C_out={C_out}, C_in={C_in}, K={K})"}
-
-    w = w.reshape(C_out, C_in, K, K)      # (out, in, K, K)
-    filters = w.mean(axis=1)               # (out, K, K) — mean over input channels
-    return filters, {"layer_type": "Conv2d", "C_in": C_in, "C_out": C_out, "K": K}
+def _parse_chw(s):
+        if not s or not isinstance(s, str):
+            return None
+        import re
+        m = re.match(r'^\s*(\d+)\s*[x×]\s*(\d+)\s*[x×]\s*(\d+)\s*$', s, re.I)
+        if not m:
+            return None
+        C, H, W = map(int, m.groups())
+        return (C, H, W)
 
 
 @app.callback(
@@ -442,76 +438,92 @@ def run_query_on_neurons(_, query, weight, action, zerofy_opts):
             ))
         )
 
-# @app.callback(
-#     Output('heatmaps-gallery', 'children'),
-#     Output('heatmaps-gallery', 'style'),
-#     Input('weights-render-freq', 'n_intervals'),
-#     Input('neuron_stats-checkboxes', 'value'),
-# )
-# def render_pre_activation_heatmaps(_, checklist_values):
-#     values = checklist_values or []
-#     show_heatmaps = 'show_heatmaps' in values
-#     if not show_heatmaps:
-#         return dash.no_update, {'display': 'none'}
+@app.callback(
+    Output({'type': 'layer-side-panel', 'layer_id': MATCH}, 'style'),
+    Input('neuron_stats-checkboxes', 'value'),
+    State({'type': 'layer-side-panel', 'layer_id': MATCH}, 'style'),
+)
+def toggle_side_panel(checklist_values, style):
+    values = checklist_values or []
+    show = ('show_activation_maps' in values) or ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
+    style = dict(style or {})
+    style['display'] = 'block' if show else 'none'
+    style['maxHeight'] = '300px'
+    style['overflowY'] = 'auto'
+    return style
 
-#     sample_id = 0
-#     origin = "eval"
 
-#     layers_df = ui_state.get_layers_df().sort_values("layer_id")
-#     gallery_children = []
+@app.callback(
+    Output({'type': 'layer-activation', 'layer_id': MATCH}, 'children'),
+    Output({'type': 'layer-activation', 'layer_id': MATCH}, 'style'),
+    Input('weights-render-freq', 'n_intervals'),
+    Input('neuron_stats-checkboxes', 'value'),
+    State({'type': 'layer-activation', 'layer_id': MATCH}, 'id'),
+)
+def render_layer_activation(_, checklist_values, act_id):
+    values = checklist_values or []
+    if 'show_activation_maps' not in values:
+        return dash.no_update, {'display': 'none'}
 
-#     for _, layer_row in layers_df.iterrows():
-#         layer_id = int(layer_row['layer_id'])
-#         layer_name = str(layer_row.get('layer_name', layer_row.get('layer_type', 'Layer')))
+    layer_id = int(act_id['layer_id'])
+    sample_id, origin = 0, "eval"
 
-#         resp = stub.GetActivations(pb2.ActivationRequest(
-#             layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
-#         ))
+    resp = stub.GetActivations(pb2.ActivationRequest(
+        layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
+    ))
 
-#         graphs = []
-#         if resp.neurons_count > 0:
-#             to_draw = resp.neurons_count
+    count = int(getattr(resp, "neurons_count", 0) or 0)
+    if count <= 0:
+        block = html.Div([html.Small("No activations available")],
+                        style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+        return [block], {'display': 'block'}
 
-#             if "Conv2d" in (resp.layer_type or ""):
-#                 for i in range(to_draw):
-#                     amap = resp.activations[i]
-#                     vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
-#                     max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
-#                     fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
-#                     graphs.append(html.Div(
-#                         dcc.Graph(figure=fig, config={'displayModeBar': False},
-#                                   style={'height': '120px', 'width': '120px'}),
-#                         style={'display': 'inline-block'}
-#                     ))
-#             else:       
-#                 scalars = np.array([resp.activations[i].values[0] for i in range(to_draw)], dtype=float)
-#                 max_abs = float(np.max(np.abs(scalars))) if scalars.size else 1.0
-#                 for v in scalars:
-#                     fig = _make_heatmap_figure([[v]], zmin=-max_abs, zmax=+max_abs)
-#                     graphs.append(html.Div(
-#                         dcc.Graph(figure=fig, config={'displayModeBar': False},
-#                                   style={'height': '60px', 'width': '60px'}),
-#                         style={'display': 'inline-block'}
-#                     ))
+    graphs = []
+    if "Conv2d" in (resp.layer_type or ""):
+        for i in range(count):
+            amap = resp.activations[i]
+            vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
+            max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
+            fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
+            graphs.append(
+                html.Div(
+                    dcc.Graph(figure=fig, config={'displayModeBar': False},
+                            style={'height': '40px', 'width': '40px'}),
+                    style={'display': 'inline-block'}
+                )
+            )
+    else:
+        scalars = np.array([resp.activations[i].values[0] for i in range(count)], dtype=float)
+        max_abs = float(np.max(np.abs(scalars))) if scalars.size else 1.0
+        z = scalars.reshape(1, -1)  # (1, N)
+        fig = _make_heatmap_figure(z, zmin=-max_abs, zmax=+max_abs)
+        width = max(20, min(20 * z.shape[1], 600))
+        graphs.append(
+            html.Div(
+                dcc.Graph(figure=fig, config={'displayModeBar': False},
+                        style={'height': '20px', 'width': f'{width}px'}),
+                style={'display': 'inline-block'}
+            )
+        )
 
-#         layer_block = html.Div([
-#             html.H5(f"Layer {layer_id}: {layer_name}", style={'margin': '0 0 6px 0'}),
-#             html.Div(
-#                 graphs,
-#                 style={
-#                     'display': 'grid',
-#                     'flexDirection': 'column',
-#                     'gap': '8px',
-#                     'maxHeight': '420px',    
-#                     'overflowY': 'auto',
-#                     'paddingRight': '6px'
-#                 }
-#             )
-#         ], style={'marginBottom': '12px','border': '1px solid #eee','padding': '8px','borderRadius': '6px'})
+    block = html.Div(
+        [
+            html.Div(
+                graphs,
+                style={
+                    'display': 'grid',
+                    'gap': '4px',
+                    'maxHeight': '420px',
+                    'overflowY': 'auto',
+                    'paddingRight': '6px'
+                }
+            )
+        ],
+        style={'borderTop': '1px solid #eee', 'paddingTop': '6px'}
+    )
+    return [block], {'display': 'block'}
 
-#         gallery_children.append(layer_block)
 
-#     return gallery_children, {'display': 'block', 'padding': '6px 10px'}
 
 @app.callback(
     Output('activation-sample-id', 'max'),
@@ -533,57 +545,89 @@ def update_sample_bounds(origin):
     Input('weights-render-freq', 'n_intervals'),
     Input('neuron_stats-checkboxes', 'value'),
     State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
+    Input('linear-incoming-shape', 'value'),
 )
-def render_layer_heatmap(_, checklist_values, heatmap_id):
+
+def render_layer_heatmap(_, checklist_values, heatmap_id, linear_shape_text):
     values = checklist_values or []
-    if 'show_heatmaps' not in values:
+    if ('show_filter_heatmaps' not in values) and ('show_heatmaps' not in values):
         return dash.no_update, {'display': 'none'}
 
     layer_id = int(heatmap_id['layer_id'])
 
-    # Pull filters directly from weights
-    filters, meta = _get_conv_filters_for_layer(layer_id)
-    if filters is None:
-        # Not a conv layer or error — show a small message block
-        msg = meta.get("error", "No filters to display")
-        block = html.Div(
-            [html.Small(msg)],
-            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'}
-        )
+    resp = stub.GetWeights(pb2.WeigthsRequest(
+        neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
+    ))
+
+    if not resp.success:
+        msg = getattr(resp, "error_message", "Unknown error")
+        block = html.Div([html.Small(msg)],
+                        style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
         return [block], {'display': 'block'}
 
-    graphs = []
-    # One heatmap per output channel (filter)
-    for f in filters:
-        # f is (K, K)
-        max_abs = float(np.max(np.abs(f))) if f.size else 1.0
-        fig = _make_heatmap_figure(f, zmin=-max_abs, zmax=+max_abs)
-        graphs.append(
-            html.Div(
-                dcc.Graph(
-                    figure=fig,
-                    config={'displayModeBar': False},
-                    style={'height': '120px', 'width': '120px'}
-                ),
-                style={'display': 'inline-block'}
-            )
-        )
+    layer_type = (resp.layer_type or "").strip()
+    C_in, C_out = int(resp.incoming), int(resp.outgoing)
+    w = np.array(resp.weights, dtype=float)
 
-    block = html.Div(
-        [
-            html.Div(
-                graphs,
-                style={
-                    'display': 'grid',
-                    'gap': '8px',
-                    'maxHeight': '420px',
-                    'overflowY': 'auto',
-                    'paddingRight': '6px'
-                }
+    tiles_by_neuron = []
+
+    if "Conv2d" in layer_type:
+        K = int(resp.kernel_size or 0)
+        expected = C_out * C_in * K * K
+        if K <= 0 or w.size != expected:
+            msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
+                f"(C_out={C_out}, C_in={C_in}, K={K})")
+            block = html.Div([html.Small(msg)],
+                            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+            return [block], {'display': 'block'}
+        w = w.reshape(C_out, C_in, K, K)
+        for out_id in range(C_out):
+            tiles_by_neuron.append([w[out_id, in_id] for in_id in range(C_in)])
+
+    else:
+        expected = C_out * C_in
+        if w.size != expected:
+            msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
+                f"(C_out={C_out}, C_in={C_in})")
+            block = html.Div([html.Small(msg)],
+                            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+            return [block], {'display': 'block'}
+
+        w = w.reshape(C_out, C_in)  # (out, in)
+        CHW = _parse_chw(linear_shape_text)
+        can_reshape = CHW is not None and (CHW[0] * CHW[1] * CHW[2] == C_in)
+
+        if can_reshape:
+            C, H, W = CHW
+            for out_id in range(C_out):
+                vol = w[out_id, :].reshape(C, H, W)      # (C,H,W)
+                tiles_by_neuron.append([vol[c] for c in range(C)])  # one H×W per input channel
+        else:
+            for out_id in range(C_out):
+                strip = _downsample_strip(w[out_id, :].reshape(1, C_in), max_len=256)
+                tiles_by_neuron.append([strip])
+
+    rows = []
+    for row_tiles in tiles_by_neuron:
+        row_graphs = []
+        for z in row_tiles:
+            max_abs = float(np.max(np.abs(z))) if z.size else 1.0
+            fig = _make_heatmap_figure(z, zmin=-max_abs, zmax=+max_abs)
+            if z.ndim == 2 and z.shape[0] == 1:  # strip
+                width = max(40, min(10 * z.shape[1], 600))
+                style = {'height': '16px', 'width': f'{width}px'}
+            else:                                 # square map (K×K or H×W)
+                style = {'height': '36px', 'width': '36px'}
+            row_graphs.append(
+                html.Div(dcc.Graph(figure=fig, config={'displayModeBar': False}, style=style),
+                        style={'display': 'inline-block', 'marginRight': '4px'})
             )
-        ],
-        style={'borderTop': '1px solid #eee', 'paddingTop': '6px'}
-    )
+        rows.append(html.Div(row_graphs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'}))
+
+    block = html.Div(rows, style={
+        'borderTop': '1px solid #eee', 'paddingTop': '6px',
+        'maxHeight': '420px', 'overflowY': 'auto', 'paddingRight': '6px'
+    })
     return [block], {'display': 'block'}
 
 

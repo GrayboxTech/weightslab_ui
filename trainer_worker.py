@@ -744,8 +744,11 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 amap = pb2.ActivationMap(neuron_id=c, values=vals, H=H, W=W)
                 resp.activations.append(amap)
         else:
-            if y_np.ndim != 2:  # (B, N)
-                return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
+            if y_np.ndim == 1:
+                y_np = y_np.reshape(1, -1)
+            elif y_np.ndim != 2:
+                y_np = y_np.reshape(1, -1)
+
             _, N = y_np.shape
             resp.neurons_count = int(N)
             for n in range(N):
@@ -760,7 +763,7 @@ def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=6))
     servicer = ExperimentServiceServicer()
     pb2_grpc.add_ExperimentServiceServicer_to_server(servicer, server)
-    server.add_insecure_port('[::]:50052')
+    server.add_insecure_port('[::]:50051')
     server.start()
     # experiment.toggle_training_status()
     server.wait_for_termination()
