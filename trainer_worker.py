@@ -671,19 +671,19 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         elif "Linear" in layer.__class__.__name__:
             answer.layer_type = "Linear"
 
-        # if neuron_id.neuron_id >= layer.neuron_count:
-        #     answer.success = False
-        #     answer.error_messages = \
-        #         f"Neuron {neuron_id.neuron_id} outside bounds."
-        #     return answer
+        if neuron_id.neuron_id >= layer.neuron_count:
+            answer.success = False
+            answer.error_messages = \
+                f"Neuron {neuron_id.neuron_id} outside bounds."
+            return answer
 
-        # if neuron_id.neuron_id < 0:
-        #     # Return all weights
-        #     weights = layer.weight.data.cpu().detach().numpy().flatten()
-        # else:
-        #     weights = layer.weight[
-        #         neuron_id.neuron_id].data.cpu().detach().numpy().flatten()
-        # answer.weights.extend(weights)
+        if neuron_id.neuron_id < 0:
+            # Return all weights
+            weights = layer.weight.data.cpu().detach().numpy().flatten()
+        else:
+            weights = layer.weight[
+                neuron_id.neuron_id].data.cpu().detach().numpy().flatten()
+        answer.weights.extend(weights)
 
         return answer
         
