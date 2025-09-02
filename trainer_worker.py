@@ -699,7 +699,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
         x = _get_input_tensor_for_sample(ds, sid)
         layer_id = int(request.layer_id)
-        assert experiment.model.get_layer_by_id(layer_id).device() == torch.device('cuda')
+        assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
         intermediaries = {}
         try:
             with torch.no_grad():
@@ -724,7 +724,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
         if layer_id not in intermediaries:
             return pb2.ActivationResponse(layer_type="", neurons_count=0)
-        assert experiment.model.get_layer_by_id(layer_id).device() == torch.device('cuda')
+        assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
         y = intermediaries[layer_id]
         if hasattr(y, "detach"):
             y = y.detach().cpu()
@@ -755,7 +755,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 v = float(y_np[0, n])
                 amap = pb2.ActivationMap(neuron_id=n, values=[v], H=1, W=1)
                 resp.activations.append(amap)
-        assert experiment.model.get_layer_by_id(layer_id).device() == torch.device('cuda')
+        assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
         return resp
 
 
