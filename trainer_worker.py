@@ -699,8 +699,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             return pb2.ActivationResponse(layer_type="", neurons_count=0)
 
         x = _get_input_tensor_for_sample(ds, sid)
+        x = x.to(experiment.model.device, non_blocking=True)
         layer_id = int(request.layer_id)
-        assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
         intermediaries = {}
         try:
             with torch.no_grad():
