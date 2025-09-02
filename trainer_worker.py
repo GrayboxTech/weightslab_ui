@@ -706,22 +706,19 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             with torch.no_grad():
                 _, intermediaries = experiment.model.forward(x, intermediary_outputs=[layer_id])
 
-        except Exception as e:
-            print(f'forward with intermediary failed: {type(e).__name__}: {e}')
-
-        # except Exception:
-        #     captured = {}
-        #     layer = experiment.model.get_layer_by_id(layer_id)
-        #     def hook(module, inputs, output):
-        #         captured['y'] = output.detach().cpu()
-        #     handle = layer.register_forward_hook(hook)
-        #     try:
-        #         with torch.no_grad():
-        #             _ = experiment.model.forward(x)
-        #         if 'y' in captured:
-        #             intermediaries[layer_id] = captured['y']
-        #     finally:
-        #         handle.remove()
+        except Exception:
+            captured = {}
+            layer = experiment.model.get_layer_by_id(layer_id)
+            def hook(module, inputs, output):
+                captured['y'] = output.detach().cpu()
+            handle = layer.register_forward_hook(hook)
+            try:
+                with torch.no_grad():
+                    _ = experiment.model.forward(x)
+                if 'y' in captured:
+                    intermediaries[layer_id] = captured['y']
+            finally:
+                handle.remove()
 
         # if layer_id not in intermediaries:
         #     return pb2.ActivationResponse(layer_type="", neurons_count=0)
