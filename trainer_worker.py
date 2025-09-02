@@ -720,40 +720,39 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             finally:
                 handle.remove()
 
-        # if layer_id not in intermediaries:
-        #     return pb2.ActivationResponse(layer_type="", neurons_count=0)
-        # assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
-        # y = intermediaries[layer_id]
-        # if hasattr(y, "detach"):
-        #     y = y.detach().cpu()
-        # y_np = y.numpy()
+        if layer_id not in intermediaries:
+            return pb2.ActivationResponse(layer_type="", neurons_count=0)
+        assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
+        y = intermediaries[layer_id]
+        if hasattr(y, "detach"):
+            y = y.detach().cpu()
+        y_np = y.numpy()
 
-        # layer = experiment.model.get_layer_by_id(layer_id)
-        # layer_type = layer.__class__.__name__
-        # resp = pb2.ActivationResponse(layer_type=layer_type)
+        layer = experiment.model.get_layer_by_id(layer_id)
+        layer_type = layer.__class__.__name__
+        resp = pb2.ActivationResponse(layer_type=layer_type)
 
-        # if "Conv2d" in layer_type:
-        #     if y_np.ndim != 4:  # (B, C, H, W)
-        #         return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
-        #     _, C, H, W = y_np.shape
-        #     resp.neurons_count = int(C)
-        #     for c in range(C):
-        #         vals = y_np[0, c].astype(np.float32).reshape(-1).tolist()
-        #         amap = pb2.ActivationMap(neuron_id=c, values=vals, H=H, W=W)
-        #         resp.activations.append(amap)
-        # else:
-        #     if y_np.ndim == 1:
-        #         y_np = y_np.reshape(1, -1)
-        #     elif y_np.ndim != 2:
-        #         y_np = y_np.reshape(1, -1)
+        if "Conv2d" in layer_type:
+            if y_np.ndim != 4:  # (B, C, H, W)
+                return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
+            _, C, H, W = y_np.shape
+            resp.neurons_count = int(C)
+            for c in range(C):
+                vals = y_np[0, c].astype(np.float32).reshape(-1).tolist()
+                amap = pb2.ActivationMap(neuron_id=c, values=vals, H=H, W=W)
+                resp.activations.append(amap)
+        else:
+            if y_np.ndim == 1:
+                y_np = y_np.reshape(1, -1)
+            elif y_np.ndim != 2:
+                y_np = y_np.reshape(1, -1)
 
-        #     _, N = y_np.shape
-        #     resp.neurons_count = int(N)
-        #     for n in range(N):
-        #         v = float(y_np[0, n])
-        #         amap = pb2.ActivationMap(neuron_id=n, values=[v], H=1, W=1)
-        #         resp.activations.append(amap)
-        # assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
+            _, N = y_np.shape
+            resp.neurons_count = int(N)
+            for n in range(N):
+                v = float(y_np[0, n])
+                amap = pb2.ActivationMap(neuron_id=n, values=[v], H=1, W=1)
+                resp.activations.append(amap)
         return resp
 
 
