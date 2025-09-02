@@ -152,7 +152,7 @@ class TinyImageNet_2(NetworkWithOps, nn.Module):
             (self.bn5,   self.fc1,   DepType.INCOMING),
             (self.fc1,   self.fc2,   DepType.INCOMING),
         ])
-        self.flatten_conv_id = self.bn3.get_module_id()
+        # self.flatten_conv_id = self.bn3.get_module_id()
 
     def forward(self, x):
         self.maybe_update_age(x)
@@ -161,7 +161,10 @@ class TinyImageNet_2(NetworkWithOps, nn.Module):
                          (self.conv3, self.bn3),
                          (self.conv4, self.bn4),
                          (self.conv5, self.bn5)]:
-            x = self.pool(F.relu(bn(conv(x))))
+            try:
+                x = self.pool(F.relu(bn(conv(x))))
+            except:
+                print(f'exception in forward:{conv.get_module_id()}')
         x = self.gap(x)
         x = x.view(x.size(0), -1)
         x = self.dropout(x)
@@ -200,8 +203,6 @@ test_set = ImageFolder('./data/tiny-imagenet-200/val/classified', transform=tran
 #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
     device = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")
 else:
     device = torch.device("cpu")
 print('device:', device)
@@ -244,6 +245,8 @@ def get_exp():
 if __name__ == "__main__":
     exp = get_exp()
     exp.set_is_training(True)
+    # import pdb; pdb.set_trace()
+    # exp.model.prune(layer_id = 4, neuron_indices = {4,})
     for step in range(10):
         exp.train_step_or_eval_full()
         print(f'Step {step+1}')
