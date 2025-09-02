@@ -701,10 +701,12 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         x = _get_input_tensor_for_sample(ds, sid)
         layer_id = int(request.layer_id)
         assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
-        # intermediaries = {}
-        # try:
-        #     with torch.no_grad():
-        #         _ = experiment.model.forward(x, intermediary=intermediaries)
+        intermediaries = {}
+        try:
+            with torch.no_grad():
+                _ = experiment.model.forward(x, intermediary=intermediaries)
+        except Exception as e:
+            print(f'forward with intermediary failed: {type(e).__name__}: {e}')
         # except TypeError:
         #     try:
         #         with torch.no_grad():
