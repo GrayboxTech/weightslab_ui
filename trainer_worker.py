@@ -651,25 +651,25 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         # print(f"ExperimentServiceServicer.GetWeights({request})")
         answer = pb2.WeightsResponse(success=True, error_message="")
 
-        # neuron_id = request.neuron_id
-        # layer = None
-        # try:
-        #     layer = experiment.model.get_layer_by_id(neuron_id.layer_id)
-        # except Exception as e:
-        #     answer.success = False
-        #     answer.error_messages = str(e)
-        #     return answer
+        neuron_id = request.neuron_id
+        layer = None
+        try:
+            layer = experiment.model.get_layer_by_id(neuron_id.layer_id)
+        except Exception as e:
+            answer.success = False
+            answer.error_messages = str(e)
+            return answer
 
-        # #answer.neuron_id = request.neuron_id
-        # answer.neuron_id.CopyFrom(request.neuron_id)
-        # answer.layer_name = layer.__class__.__name__
-        # answer.incoming = layer.incoming_neuron_count
-        # answer.outgoing = layer.neuron_count
-        # if "Conv2d" in layer.__class__.__name__:
-        #     answer.layer_type = "Conv2d"
-        #     answer.kernel_size = layer.kernel_size[0]
-        # elif "Linear" in layer.__class__.__name__:
-        #     answer.layer_type = "Linear"
+        #answer.neuron_id = request.neuron_id
+        answer.neuron_id.CopyFrom(request.neuron_id)
+        answer.layer_name = layer.__class__.__name__
+        answer.incoming = layer.incoming_neuron_count
+        answer.outgoing = layer.neuron_count
+        if "Conv2d" in layer.__class__.__name__:
+            answer.layer_type = "Conv2d"
+            answer.kernel_size = layer.kernel_size[0]
+        elif "Linear" in layer.__class__.__name__:
+            answer.layer_type = "Linear"
 
         # if neuron_id.neuron_id >= layer.neuron_count:
         #     answer.success = False
