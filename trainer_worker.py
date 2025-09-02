@@ -688,14 +688,15 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         return answer
         
     def GetActivations(self, request, context):
-        # try:
-        #     ds = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
-        # except Exception:
-        #     ds = experiment.train_loader.dataset
+        resp = pb2.ActivationResponse(layer_type='conv')
+        try:
+            ds = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
+        except Exception:
+            ds = experiment.train_loader.dataset
 
-        # sid = int(request.sample_id)
-        # if sid < 0 or sid >= len(ds):
-        #     return pb2.ActivationResponse(layer_type="", neurons_count=0)
+        sid = int(request.sample_id)
+        if sid < 0 or sid >= len(ds):
+            return pb2.ActivationResponse(layer_type="", neurons_count=0)
 
         # x = _get_input_tensor_for_sample(ds, sid)
         # layer_id = int(request.layer_id)
@@ -756,7 +757,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         #         amap = pb2.ActivationMap(neuron_id=n, values=[v], H=1, W=1)
         #         resp.activations.append(amap)
         # assert experiment.model.get_layer_by_id(layer_id).device == torch.device('cuda')
-        resp = pb2.ActivationResponse(layer_type='conv')
         return resp
 
 
