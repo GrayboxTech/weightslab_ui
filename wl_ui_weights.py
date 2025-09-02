@@ -452,22 +452,53 @@ def toggle_side_panel(checklist_values, style):
     style['overflowY'] = 'auto'
     return style
 
+@app.callback(
+    Output('activation-controls', 'style'),
+    Input('neuron_stats-checkboxes', 'value'),
+    State('activation-controls', 'style'),
+)
+def toggle_activation_controls(values, style):
+    style = dict(style or {})
+    values = values or []
+    style['display'] = 'block' if 'show_activation_maps' in values else 'none'
+    style['whiteSpace'] = 'nowrap'
+    style['overflow'] = 'hidden'
+    return style
+
+@app.callback(
+    Output({'type': 'linear-shape-wrapper', 'layer_id': MATCH}, 'style'),
+    Input('neuron_stats-checkboxes', 'value'),
+    State({'type': 'linear-shape-wrapper', 'layer_id': MATCH}, 'style'),
+    prevent_initial_call=True
+)
+def toggle_linear_shape_input(values, style):
+    style = dict(style or {})
+    values = values or []
+    if 'show_filter_heatmaps' in values:
+        style['display'] = 'block'
+    else:
+        style['display'] = 'none'
+    return style
+
 
 @app.callback(
     Output({'type': 'layer-activation', 'layer_id': MATCH}, 'children'),
     Output({'type': 'layer-activation', 'layer_id': MATCH}, 'style'),
     Input('weights-render-freq', 'n_intervals'),
     Input('neuron_stats-checkboxes', 'value'),
+    Input('activation-sample-id', 'value'),   
+    Input('activation-origin', 'value'),  
     State({'type': 'layer-activation', 'layer_id': MATCH}, 'id'),
 )
-def render_layer_activation(_, checklist_values, act_id):
+def render_layer_activation(_, checklist_values, sample_value, origin_value, act_id):
     values = checklist_values or []
     if 'show_activation_maps' not in values:
         return dash.no_update, {'display': 'none'}
 
     layer_id = int(act_id['layer_id'])
     sample_id, origin = 0, "eval"
-
+    sample_id = int(sample_value) if sample_value is not None else 0
+    origin = origin_value or "eval"
     resp = stub.GetActivations(pb2.ActivationRequest(
         layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
     ))
@@ -545,15 +576,29 @@ def update_sample_bounds(origin):
     Input('weights-render-freq', 'n_intervals'),
     Input('neuron_stats-checkboxes', 'value'),
     State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
-    Input('linear-incoming-shape', 'value'),
+    State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'id'),
+    State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'value'),
 )
-
-def render_layer_heatmap(_, checklist_values, heatmap_id, linear_shape_text):
+def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_linear_values):
     values = checklist_values or []
     if ('show_filter_heatmaps' not in values) and ('show_heatmaps' not in values):
-        return dash.no_update, {'display': 'none'}
+        return no_update, {'display': 'none'}
+
+    if not heatmap_id or 'layer_id' not in heatmap_id:
+        return no_update, {'display': 'none'}
 
     layer_id = int(heatmap_id['layer_id'])
+
+    linear_shape_text = None
+    if all_linear_ids and all_linear_values:
+        try:
+            id_to_val = {
+                (i.get('layer_id') if isinstance(i, dict) else None): v
+                for i, v in zip(all_linear_ids, all_linear_values)
+            }
+            linear_shape_text = id_to_val.get(layer_id, None)
+        except Exception:
+            linear_shape_text = None
 
     resp = stub.GetWeights(pb2.WeigthsRequest(
         neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
@@ -619,14 +664,15 @@ def render_layer_heatmap(_, checklist_values, heatmap_id, linear_shape_text):
             else:                                 # square map (K×K or H×W)
                 style = {'height': '36px', 'width': '36px'}
             row_graphs.append(
-                html.Div(dcc.Graph(figure=fig, config={'displayModeBar': False}, style=style),
-                        style={'display': 'inline-block', 'marginRight': '4px'})
+                html.Div(
+                    dcc.Graph(figure=fig, config={'displayModeBar': False}, style=style),
+                    style={'display': 'inline-block', 'marginRight': '4px'}
+                )
             )
         rows.append(html.Div(row_graphs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'}))
 
     block = html.Div(rows, style={
-        'borderTop': '1px solid #eee', 'paddingTop': '6px',
-        'maxHeight': '420px', 'overflowY': 'auto', 'paddingRight': '6px'
+        'borderTop': '1px solid #eee', 'paddingTop': '6px', 'paddingRight': '6px'
     })
     return [block], {'display': 'block'}
 

@@ -1093,6 +1093,81 @@ def get_layer_div(
     except Exception as e:
         return no_update
 
+    linear_input_box = None
+    if getattr(layer_row, "layer_type", "") == "Linear":
+        linear_input_box = html.Div(
+            dbc.Input(
+                id={'type': 'linear-incoming-shape', 'layer_id': int(layer_row['layer_id'])},
+                type='text',
+                placeholder='CxHxW (e.g. 3x5x5)',
+                style={'width': '12ch'}
+            ),
+            id={'type': 'linear-shape-wrapper', 'layer_id': int(layer_row['layer_id'])},
+            style={'display': 'none', 'marginTop': '4px'}
+        )
+
+    table_wrap = html.Div(
+        id={'type': 'layer-table-wrap', 'layer_id': int(layer_row['layer_id'])},
+        children=[
+            dash_table.DataTable(
+                id={"type": "layer-data-table", "layer_id": layer_row['layer_id']},
+                data=neurons_view_df.to_dict("records"),
+                columns=[{"name": col, "id": col} for col in neurons_view_df.columns],
+                sort_action="native",
+                row_selectable='single',
+                style_table={
+                    "maxHeight": "300px",
+                    "overflowY": "scroll",
+                    "width": "100%",
+                    "minWidth": "100%",
+                },
+                style_cell={
+                    "minWidth": "60px",
+                    "width": "60px",
+                    "maxWidth": f"{WIDTH_PER_COLUMN}px",
+                },
+                style_data={"whiteSpace": "normal", "height": "auto"},
+                style_data_conditional=[
+                    {"if": {"filter_query": "{Status} = 'OVRFT'"},
+                    "color": "red", "fontWeight": "bold"},
+                    {"if": {"filter_query": "{Status} = 'BAD'"},
+                    "color": "orange"},
+                    {"if": {"filter_query": "{Status} = 'GREAT'"},
+                    "color": "green", "fontWeight": "bold"},
+                    {"if": {"filter_query": "{Status} = 'DEAD'"},
+                    "color": "black", "backgroundColor": "#e0e0e0"},
+                    {"if": {"filter_query": "{Status} = 'FROZEN'"},
+                    "color": "#B7C9E2"},
+                    {"if": {"filter_query": "{Status} = 'N/A'"},
+                    "color": "#a0a0a0", "fontStyle": "italic"},
+                ],
+            ),
+        ],
+        style={"flex": "1 1 auto", "minWidth": 0}
+    )
+
+    side_panel = html.Div(
+        id={'type': 'layer-side-panel', 'layer_id': int(layer_row['layer_id'])},
+        children=[
+            linear_input_box,
+            html.Div(
+                id={'type': 'layer-activation', 'layer_id': int(layer_row['layer_id'])},
+                children=[],
+                style={'display': 'none', 'marginBottom': '8px'}
+            ),
+            html.Div(
+                id={'type': 'layer-heatmap', 'layer_id': int(layer_row['layer_id'])},
+                children=[],
+                style={'display': 'none'}
+            ),
+        ],
+        style={
+            'display': 'none',
+            'maxHeight': '300px',
+            'overflowY': 'auto'
+        }
+    )
+
     return html.Div(
         id={"type": "layer-div", "layer_id": layer_row['layer_id']},
         children=[
@@ -1103,49 +1178,8 @@ def get_layer_div(
             ),
 
             html.Div(
-                children=[
-                    dash_table.DataTable(
-                        id={"type": "layer-data-table", "layer_id": layer_row['layer_id']},
-                        data=neurons_view_df.to_dict("records"),
-                        columns=[{"name": col, "id": col} for col in neurons_view_df.columns],
-                        sort_action="native",
-                        row_selectable='single',
-                        style_table={"maxHeight": "300px", "overflowY": "scroll"},
-                        style_cell={"minWidth": "60px", "width": "60px", "maxWidth": f"{WIDTH_PER_COLUMN}px"},
-                        style_data={"whiteSpace": "normal", "height": "auto"},
-                        style_data_conditional=[ 
-                            {"if": {"filter_query": "{Status} = 'OVRFT'"}, "color": "red", "fontWeight": "bold"},
-                            {"if": {"filter_query": "{Status} = 'BAD'"}, "color": "orange"},
-                            {"if": {"filter_query": "{Status} = 'GREAT'"}, "color": "green", "fontWeight": "bold"},
-                            {"if": {"filter_query": "{Status} = 'DEAD'"}, "color": "black", "backgroundColor": "#e0e0e0"},
-                            {"if": {"filter_query": "{Status} = 'FROZEN'"}, "color": "#B7C9E2"},
-                            {"if": {"filter_query": "{Status} = 'N/A'"}, "color": "#a0a0a0", "fontStyle": "italic"},
-                        ],
-                    ),
-
-                    html.Div(
-                        id={'type': 'layer-side-panel', 'layer_id': int(layer_row['layer_id'])},
-                        children=[
-                            html.Div(
-                                id={'type': 'layer-activation', 'layer_id': int(layer_row['layer_id'])},
-                                children=[],
-                                style={'display': 'none', 'marginBottom': '8px'}
-                            ),
-                            html.Div(
-                                id={'type': 'layer-heatmap', 'layer_id': int(layer_row['layer_id'])},
-                                children=[],
-                                style={'display': 'none'}
-                            ),
-                        ],
-                        style={
-                            'display': 'none',
-                            'marginLeft': '10px',
-                            'maxHeight': '300px',  
-                            'overflowY': 'auto'    
-                        }
-                    ),
-                ],
-                style={'display': 'flex', 'alignItems': 'flex-start'}
+                children=[table_wrap, side_panel], 
+                style={'display': 'flex', 'alignItems': 'flex-start', 'gap': '8px'}
             ),
 
             get_layer_ops_buttons(layer_row['layer_id']),
@@ -1292,25 +1326,57 @@ def zerofy_checklist():
         }
     )
 
-def linear_shape_input():
-    return dbc.Col(
-        dbc.Input(
-            id='linear-incoming-shape',
-            type='text',
-            placeholder='Linear input CxHxW (e.g. 3x5x5)',
-            style={'width': '14vw'}
+def activation_controls():
+    return html.Div(
+        id='activation-controls',
+        children=dbc.InputGroup(
+            [
+                dbc.InputGroupText("Activations"),
+                html.Div(
+                    dcc.RadioItems(
+                        id='activation-origin',
+                        options=[
+                            {'label': 'Eval',  'value': 'eval'},
+                            {'label': 'Train', 'value': 'train'},
+                        ],
+                        value='eval',
+                        inline=True,
+                        inputStyle={'marginRight': '4px'},
+                        labelStyle={'marginRight': '12px', 'marginBottom': '0'}
+                    ),
+                    style={'display': 'flex', 'alignItems': 'center', 'padding': '0 6px'}
+                ),
+                dbc.InputGroupText("Sample"),
+                dbc.Input(
+                    id='activation-sample-id',
+                    type='number',
+                    min=0,
+                    value=0,
+                    style={'width': '90px'}
+                ),
+                dbc.InputGroupText(
+                    id='activation-sample-count',
+                    children="ID range: (loading…)",
+                    style={'minWidth': 'fit-content'}
+                ),
+            ],
+            size="sm",
+            className="justify-content-center d-flex align-items-center flex-nowrap gap-2"
         ),
-        style={'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center'}
+        style={
+            'display': 'none',          
+            'margin': '6px auto 2px',
+            'maxWidth': '720px'         
+        }
     )
-
 
 def get_weights_div(ui_state: UIState):
     return html.Div(
         id="model-architecture-div",
         children=[
             stats_display_checklist(ui_state),
-            linear_shape_input(),
             zerofy_checklist(),
+            activation_controls(),
             interactable_layers(ui_state),
             get_neuron_query_input_div(ui_state),
             get_weights_modal(ui_state),
@@ -1339,13 +1405,15 @@ def _parse_chw(s):
         return (C, H, W)
 
 def _make_heatmap_figure(z, zmin=None, zmax=None):
-    return go.Figure(
+    fig = go.Figure(
         data=[go.Heatmap(
             z=z, zmid=0, zmin=zmin, zmax=zmax,
             colorscale=[[0.0, 'red'], [0.5, 'white'], [1.0, 'green']],
             showscale=False
         )]
-    ).update_layout(
+    )
+    fig.update_yaxes(autorange='reversed')
+    return fig.update_layout(
         margin=dict(l=2, r=2, t=2, b=2),
         xaxis_showgrid=False, yaxis_showgrid=False,
         xaxis_visible=False, yaxis_visible=False,
@@ -2466,22 +2534,53 @@ def main():
         style['overflowY'] = 'auto'
         return style
 
+    @app.callback(
+        Output('activation-controls', 'style'),
+        Input('neuron_stats-checkboxes', 'value'),
+        State('activation-controls', 'style'),
+    )
+    def toggle_activation_controls(values, style):
+        style = dict(style or {})
+        values = values or []
+        style['display'] = 'block' if 'show_activation_maps' in values else 'none'
+        style['whiteSpace'] = 'nowrap'
+        style['overflow'] = 'hidden'
+        return style
+
+    @app.callback(
+        Output({'type': 'linear-shape-wrapper', 'layer_id': MATCH}, 'style'),
+        Input('neuron_stats-checkboxes', 'value'),
+        State({'type': 'linear-shape-wrapper', 'layer_id': MATCH}, 'style'),
+        prevent_initial_call=True
+    )
+    def toggle_linear_shape_input(values, style):
+        style = dict(style or {})
+        values = values or []
+        if 'show_filter_heatmaps' in values:
+            style['display'] = 'block'
+        else:
+            style['display'] = 'none'
+        return style
+
 
     @app.callback(
         Output({'type': 'layer-activation', 'layer_id': MATCH}, 'children'),
         Output({'type': 'layer-activation', 'layer_id': MATCH}, 'style'),
         Input('weights-render-freq', 'n_intervals'),
         Input('neuron_stats-checkboxes', 'value'),
+        Input('activation-sample-id', 'value'),   
+        Input('activation-origin', 'value'),  
         State({'type': 'layer-activation', 'layer_id': MATCH}, 'id'),
     )
-    def render_layer_activation(_, checklist_values, act_id):
+    def render_layer_activation(_, checklist_values, sample_value, origin_value, act_id):
         values = checklist_values or []
         if 'show_activation_maps' not in values:
             return dash.no_update, {'display': 'none'}
 
         layer_id = int(act_id['layer_id'])
         sample_id, origin = 0, "eval"
-
+        sample_id = int(sample_value) if sample_value is not None else 0
+        origin = origin_value or "eval"
         resp = stub.GetActivations(pb2.ActivationRequest(
             layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
         ))
@@ -2559,15 +2658,29 @@ def main():
         Input('weights-render-freq', 'n_intervals'),
         Input('neuron_stats-checkboxes', 'value'),
         State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
-        Input('linear-incoming-shape', 'value'),
+        State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'id'),
+        State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'value'),
     )
-
-    def render_layer_heatmap(_, checklist_values, heatmap_id, linear_shape_text):
+    def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_linear_values):
         values = checklist_values or []
         if ('show_filter_heatmaps' not in values) and ('show_heatmaps' not in values):
-            return dash.no_update, {'display': 'none'}
+            return no_update, {'display': 'none'}
+
+        if not heatmap_id or 'layer_id' not in heatmap_id:
+            return no_update, {'display': 'none'}
 
         layer_id = int(heatmap_id['layer_id'])
+
+        linear_shape_text = None
+        if all_linear_ids and all_linear_values:
+            try:
+                id_to_val = {
+                    (i.get('layer_id') if isinstance(i, dict) else None): v
+                    for i, v in zip(all_linear_ids, all_linear_values)
+                }
+                linear_shape_text = id_to_val.get(layer_id, None)
+            except Exception:
+                linear_shape_text = None
 
         resp = stub.GetWeights(pb2.WeigthsRequest(
             neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
@@ -2633,14 +2746,15 @@ def main():
                 else:                                 # square map (K×K or H×W)
                     style = {'height': '36px', 'width': '36px'}
                 row_graphs.append(
-                    html.Div(dcc.Graph(figure=fig, config={'displayModeBar': False}, style=style),
-                            style={'display': 'inline-block', 'marginRight': '4px'})
+                    html.Div(
+                        dcc.Graph(figure=fig, config={'displayModeBar': False}, style=style),
+                        style={'display': 'inline-block', 'marginRight': '4px'}
+                    )
                 )
             rows.append(html.Div(row_graphs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'}))
 
         block = html.Div(rows, style={
-            'borderTop': '1px solid #eee', 'paddingTop': '6px',
-            'maxHeight': '420px', 'overflowY': 'auto', 'paddingRight': '6px'
+            'borderTop': '1px solid #eee', 'paddingTop': '6px', 'paddingRight': '6px'
         })
         return [block], {'display': 'block'}
 
