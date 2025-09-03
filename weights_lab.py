@@ -1093,6 +1093,17 @@ def get_layer_div(
     except Exception as e:
         return no_update
 
+    # --- NEW: small per-layer checkbox to enable fetching filters for this layer ---
+    fetch_filters_toggle = html.Div(
+        dbc.Checkbox(
+            id={'type': 'layer-heatmap-checkbox', 'layer_id': int(layer_row['layer_id'])},
+            value=False,
+            className="form-check-input",
+        ),
+        style={'display': 'inline-block', 'marginLeft': '6px', 'verticalAlign': 'middle'},
+        title="Fetch filter weights/heatmaps for this layer (throttled & limited)"
+    )
+
     linear_input_box = None
     if getattr(layer_row, "layer_type", "") == "Linear":
         linear_input_box = html.Div(
@@ -1149,6 +1160,15 @@ def get_layer_div(
     side_panel = html.Div(
         id={'type': 'layer-side-panel', 'layer_id': int(layer_row['layer_id'])},
         children=[
+            html.Div(
+                [
+                    html.Span("", style={'flex': '1 1 auto'}), 
+                    html.Small("Fetch filters", style={'marginRight': '6px'}),
+                    fetch_filters_toggle,
+                ],
+                style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'flex-end',
+                    'gap': '6px', 'marginBottom': '4px'}
+            ),
             linear_input_box,
             html.Div(
                 id={'type': 'layer-activation', 'layer_id': int(layer_row['layer_id'])},
@@ -1967,6 +1987,7 @@ def get_ui_app_layout(ui_state: UIState) -> html.Div:
         dcc.Store(id='train-image-selected-ids', data=[]),
         dcc.Store(id='eval-image-selected-ids', data=[]),
         dcc.Interval(id='weights-render-freq', interval=1*1000, n_intervals=0),
+        dcc.Interval(id='weights-fetch-freq', interval=15000, n_intervals=0),
         dcc.Interval(id='datatbl-render-freq', interval=10*1000, n_intervals=0),
         dcc.Interval(id='graphss-render-freq', interval=10*1000, n_intervals=0),
     ]
@@ -2655,21 +2676,38 @@ def main():
     @app.callback(
         Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'children'),
         Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'style'),
-        Input('weights-render-freq', 'n_intervals'),
+        Input('weights-fetch-freq', 'n_intervals'),                     
         Input('neuron_stats-checkboxes', 'value'),
         State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
         State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'id'),
         State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'value'),
+        State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'id'),    
+        State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'value'),
     )
-    def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_linear_values):
+    def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_linear_values,
+                            all_cb_ids, all_cb_vals):
         values = checklist_values or []
-        if ('show_filter_heatmaps' not in values) and ('show_heatmaps' not in values):
+        global_heatmap_enabled = ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
+        if not global_heatmap_enabled:
             return no_update, {'display': 'none'}
 
         if not heatmap_id or 'layer_id' not in heatmap_id:
             return no_update, {'display': 'none'}
 
         layer_id = int(heatmap_id['layer_id'])
+
+        is_layer_checked = False
+        try:
+            for cid, cval in zip(all_cb_ids or [], all_cb_vals or []):
+                lid = int(cid.get('layer_id')) if isinstance(cid, dict) else None
+                if lid == layer_id:
+                    is_layer_checked = bool(cval)
+                    break
+        except Exception:
+            is_layer_checked = False
+
+        if not is_layer_checked:
+            return no_update, {'display': 'none'}
 
         linear_shape_text = None
         if all_linear_ids and all_linear_values:

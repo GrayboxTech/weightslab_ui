@@ -12,6 +12,10 @@ import plotly.graph_objs as go
 import numpy as np
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
+import base64
+from io import BytesIO
+from PIL import Image
+
 from weights_lab import (
     UIState, get_weights_div,
     convert_checklist_to_df_head, format_values_df,
@@ -71,6 +75,7 @@ app.title = "WeightsLab - Architecture Only"
 
 app.layout = html.Div([
     dcc.Interval(id='weights-render-freq', interval=5000, n_intervals=0),
+    dcc.Interval(id='weights-fetch-freq', interval=15000, n_intervals=0),
     html.H1("Model Architecture", style={'textAlign': 'center'}),
     get_header_hyper_params_div(ui_state),
     get_weights_div(ui_state)
@@ -125,6 +130,63 @@ def _parse_chw(s):
         C, H, W = map(int, m.groups())
         return (C, H, W)
 
+def _rwg_rgb_from_signed(z: np.ndarray) -> np.ndarray:
+    a = np.asarray(z, dtype=np.float32)
+    if a.size == 0:
+        return np.zeros((1, 1, 3), dtype=np.uint8)
+    max_abs = float(np.max(np.abs(a)))
+    if max_abs <= 1e-12:
+        max_abs = 1.0
+    t = np.clip(a / max_abs, -1.0, 1.0)
+
+    r = np.empty_like(t)
+    g = np.empty_like(t)
+    b = np.empty_like(t)
+
+    neg = t < 0
+    r[neg] = 1.0
+    g[neg] = 1.0 + t[neg] 
+    b[neg] = 1.0 + t[neg]
+
+    pos = ~neg
+    r[pos] = 1.0 - t[pos]
+    g[pos] = 1.0
+    b[pos] = 1.0 - t[pos]
+
+    rgb = np.stack([r, g, b], axis=-1)
+    return (np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
+def _png_data_uri_from_rgb(rgb: np.ndarray) -> str:
+    img = Image.fromarray(rgb, mode="RGB")
+    buf = BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+
+def _tile_img_component(z: np.ndarray) -> html.Img:
+    z = np.asarray(z, dtype=np.float32)
+    rgb = _rwg_rgb_from_signed(z)
+
+    H, W = rgb.shape[0], rgb.shape[1]
+
+    if z.ndim == 2 and z.shape[0] == 1:  # strip 1xN
+        target_w = int(max(40, min(10 * z.shape[1], 600)))
+        style = {
+            'height': '16px',                  
+            'width': f'{target_w}px',          
+            'imageRendering': 'pixelated',     
+        }
+    else: 
+        style = {
+            'height': '36px',                  
+            'width': '36px',
+            'imageRendering': 'pixelated',
+        }
+
+    uri = _png_data_uri_from_rgb(rgb)
+    return html.Img(src=uri, draggable="false", style=style)
 
 @app.callback(
     Output('resume-pause-train-btn', 'children', allow_duplicate=True),
@@ -573,21 +635,38 @@ def update_sample_bounds(origin):
 @app.callback(
     Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'children'),
     Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'style'),
-    Input('weights-render-freq', 'n_intervals'),
+    Input('weights-fetch-freq', 'n_intervals'),                      
     Input('neuron_stats-checkboxes', 'value'),
     State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
     State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'id'),
     State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'value'),
+    State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'id'),     
+    State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'value'),
 )
-def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_linear_values):
+def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_linear_values,
+                        all_cb_ids, all_cb_vals):
     values = checklist_values or []
-    if ('show_filter_heatmaps' not in values) and ('show_heatmaps' not in values):
+    global_heatmap_enabled = ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
+    if not global_heatmap_enabled:
         return no_update, {'display': 'none'}
 
     if not heatmap_id or 'layer_id' not in heatmap_id:
         return no_update, {'display': 'none'}
 
     layer_id = int(heatmap_id['layer_id'])
+
+    is_layer_checked = False
+    try:
+        for cid, cval in zip(all_cb_ids or [], all_cb_vals or []):
+            lid = int(cid.get('layer_id')) if isinstance(cid, dict) else None
+            if lid == layer_id:
+                is_layer_checked = bool(cval)
+                break
+    except Exception:
+        is_layer_checked = False
+
+    if not is_layer_checked:
+        return no_update, {'display': 'none'}
 
     linear_shape_text = None
     if all_linear_ids and all_linear_values:
@@ -607,14 +686,14 @@ def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_li
     if not resp.success:
         msg = getattr(resp, "error_message", "Unknown error")
         block = html.Div([html.Small(msg)],
-                        style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+                         style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
         return [block], {'display': 'block'}
 
     layer_type = (resp.layer_type or "").strip()
     C_in, C_out = int(resp.incoming), int(resp.outgoing)
-    w = np.array(resp.weights, dtype=float)
+    w = np.array(resp.weights, dtype=np.float32)
 
-    tiles_by_neuron = []
+    tiles_by_neuron: list[list[np.ndarray]] = []
 
     if "Conv2d" in layer_type:
         K = int(resp.kernel_size or 0)
@@ -654,22 +733,14 @@ def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_li
 
     rows = []
     for row_tiles in tiles_by_neuron:
-        row_graphs = []
+        row_imgs = []
         for z in row_tiles:
-            max_abs = float(np.max(np.abs(z))) if z.size else 1.0
-            fig = _make_heatmap_figure(z, zmin=-max_abs, zmax=+max_abs)
-            if z.ndim == 2 and z.shape[0] == 1:  # strip
-                width = max(40, min(10 * z.shape[1], 600))
-                style = {'height': '16px', 'width': f'{width}px'}
-            else:                                 # square map (K×K or H×W)
-                style = {'height': '36px', 'width': '36px'}
-            row_graphs.append(
-                html.Div(
-                    dcc.Graph(figure=fig, config={'displayModeBar': False}, style=style),
-                    style={'display': 'inline-block', 'marginRight': '4px'}
-                )
+            row_imgs.append(
+                html.Div(_tile_img_component(z), style={'display': 'inline-block', 'marginRight': '4px'})
             )
-        rows.append(html.Div(row_graphs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'}))
+        rows.append(
+            html.Div(row_imgs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'})
+        )
 
     block = html.Div(rows, style={
         'borderTop': '1px solid #eee', 'paddingTop': '6px', 'paddingRight': '6px'
