@@ -25,12 +25,14 @@ from weightslab.tracking import add_tracked_attrs_to_input_tensor
 
 from torch.utils.data import DataLoader, random_split
 
+from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
+
 from board import Dash
 
 
-class SmallCIFARNet(NetworkWithOps, nn.Module):
+class ConvNet(NetworkWithOps, nn.Module):
     def __init__(self):
-        super(SmallCIFARNet, self).__init__()
+        super(ConvNet, self).__init__()
         self.tracking_mode = TrackingMode.DISABLED
         # Convolution block 1
         self.conv1 = Conv2dWithNeuronOps(in_channels=3, out_channels=4, kernel_size=3, padding=1)
@@ -44,14 +46,23 @@ class SmallCIFARNet(NetworkWithOps, nn.Module):
         self.conv3 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
         self.bnorm3 = BatchNorm2dWithNeuronOps(4)
 
+        # Convolution block 4
+        self.conv4 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
+        self.bnorm4 = BatchNorm2dWithNeuronOps(4)
+
+        # Convolution block 5
+        self.conv5 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
+        self.bnorm5 = BatchNorm2dWithNeuronOps(4)
+
         # Fully connected output
-        # After three max-pool layers on 32x32 -> 4x4 feature maps
-        self.fc = LinearWithNeuronOps(4096, 2)
+        self.fc = LinearWithNeuronOps(256, 78)
 
     def children(self):
         return [
             self.conv1, self.bnorm1, self.conv2, self.bnorm2,
-            self.conv3, self.bnorm3, self.fc
+            self.conv3, self.bnorm3, self.conv4, self.bnorm4,
+            self.conv5, self.bnorm5,
+            self.fc
         ]
         
     def define_deps(self):
@@ -61,34 +72,54 @@ class SmallCIFARNet(NetworkWithOps, nn.Module):
             (self.conv2, self.bnorm2, DepType.SAME),
             (self.bnorm2, self.conv3, DepType.INCOMING),
             (self.conv3, self.bnorm3, DepType.SAME),
-            (self.bnorm3, self.fc, DepType.INCOMING),
+            (self.bnorm3, self.conv4, DepType.INCOMING),
+            (self.conv4, self.bnorm4, DepType.SAME),
+            (self.bnorm4, self.conv5, DepType.INCOMING),
+            (self.conv5, self.bnorm5, DepType.SAME),
+            (self.bnorm5, self.fc, DepType.INCOMING),
         ])
 
-        self.flatten_conv_id = self.bnorm3.get_module_id()
+        self.flatten_conv_id = self.bnorm5.get_module_id()
 
 
     def forward(self, x):
         self.maybe_update_age(x)
         # Block 1: conv -> BN -> ReLU -> max pool
         x = F.relu(self.bnorm1(self.conv1(x)))
-        x = F.max_pool2d(x, 2)  # reduces spatial size from 32 -> 16
+        x = F.max_pool2d(x, 2)  # reduces spatial size from 256 -> 128
 
         # Block 2
         x = F.relu(self.bnorm2(self.conv2(x)))
-        x = F.max_pool2d(x, 2)  # 16 -> 8
+        x = F.max_pool2d(x, 2)  # 128 -> 64
 
         # Block 3
         x = F.relu(self.bnorm3(self.conv3(x)))
-        x = F.max_pool2d(x, 2)  # 8 -> 4
+        x = F.max_pool2d(x, 2)  # 64 -> 32
+
+        # Block 4
+        x = F.relu(self.bnorm4(self.conv4(x)))
+        x = F.max_pool2d(x, 2)  # 32 -> 16
+
+        # Block 5
+        x = F.relu(self.bnorm5(self.conv5(x)))
+        x = F.max_pool2d(x, 2)  # 16 -> 8
 
         # Flatten
-        x = x.view(x.size(0), -1)  # shape = [batch_size, 128*4*4]
+        x = x.view(x.size(0), -1)  # shape = [batch_size, 8*4*4]
         out = self.fc(x)
         return out
 
 
-transform = T.Compose([T.Resize((224, 224)), T.ToTensor(),])
-root_dir = "/home/rotaru/Desktop/GRAYBOX/sales/pitch/prepare/cad_models_dataset_split/"
+transform = T.Compose([
+    # T.Resize((224, 224)),
+    T.ToTensor(),
+])
+# root_dir = "/home/rotaru/Desktop/GRAYBOX/sales/pitch/prepare/cad_models_dataset_split/"
+
+root_dir = "/home/rotaru/Desktop/GRAYBOX/repos/datasets/robotics/ycb_datasets/"
+
+
+
 train_dataset = ds.ImageFolder(
     os.path.join(root_dir, "train"), transform=transform)
 val_dataset = ds.ImageFolder(
@@ -96,17 +127,24 @@ val_dataset = ds.ImageFolder(
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+metrics = {
+    "acc": MulticlassAccuracy(num_classes=78, average="micro").to(device),
+    "f1": MulticlassF1Score(num_classes=78, average="macro").to(device),
+}
+
 def get_exp():
-    model = SmallCIFARNet()
+    model = ConvNet()
     model.define_deps()
     model.to(device)
     exp = Experiment(
         model=model, optimizer_class=optim.Adam,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        device=device, learning_rate=1e-4, batch_size=2048,
+        device=device, learning_rate=1e-4, batch_size=256,
         training_steps_to_do=200000,
         name="v0",
+        metrics=metrics,
         root_log_dir='cad_models',
         logger=Dash("cad_models"),
         skip_loading=False)
@@ -115,3 +153,9 @@ def get_exp():
         exp.display_stats()
 
     return exp
+
+
+if __name__ == "__main__":
+    import pdb; pdb.set_trace()
+    exp = get_exp()
+    exp.train_step_or_eval_full()
