@@ -711,8 +711,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 if layer_id in intermediaries:
                     y = intermediaries[layer_id]
                     
-                    if hasattr(y, 'numpy'):
-                        y_np = y.numpy()
+                    if torch.is_tensor(y):
+                        y_np = y.detach().cpu().numpy()
                     else:
                         y_np = np.array(y)
                     

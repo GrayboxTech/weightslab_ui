@@ -169,23 +169,22 @@ class TinyImageNet_2(NetworkWithOps, nn.Module):
                         (self.conv3, self.bn3),
                         (self.conv4, self.bn4),
                         (self.conv5, self.bn5)]:
-            try:
-                x = self.pool(F.relu(bn(conv(x))))
-                layer_id = conv.get_module_id()
-                if layer_id in intermediary_outputs:
-                    intermediaries[layer_id] = x.detach().cpu()
-            except Exception as e:
-                print(f'exception in forward:{conv.get_module_id()}: {e}')
-                raise
-        
+            pre = bn(conv(x))  # pre-activation
+            layer_id = conv.get_module_id()
+            if layer_id in intermediary_outputs:
+                intermediaries[layer_id] = pre.detach().cpu()
+            x = self.pool(F.relu(pre)) 
+
+
         x = self.gap(x)
         x = x.view(x.size(0), -1)
         x = self.dropout(x)
-        x = F.relu(self.fc1(x))
-        
+
+        fc1_lin = self.fc1(x)  # pre-activation
         if self.fc1.get_module_id() in intermediary_outputs:
-            intermediaries[self.fc1.get_module_id()] = x.detach().cpu()
-        
+            intermediaries[self.fc1.get_module_id()] = fc1_lin.detach().cpu()
+        x = F.relu(fc1_lin)
+
         output = self.fc2(x, skip_register=True, intermediary=None)
         
         if self.fc2.get_module_id() in intermediary_outputs:
@@ -255,8 +254,8 @@ def get_exp():
         metrics=metrics,
         training_steps_to_do=30000,
         name="v0",
-        root_log_dir="tinyimagenet-exp4_ckpt",
-        logger=Dash("tinyimagenet-exp4_ckpt"),
+        root_log_dir="test_imnet",
+        logger=Dash("test_imnet"),
         skip_loading=False
     )
 
