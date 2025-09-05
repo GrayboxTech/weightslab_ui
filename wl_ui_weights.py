@@ -14,6 +14,7 @@ import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 import base64
 from io import BytesIO
+from scope_timer import ScopeTimer
 from PIL import Image
 
 from weights_lab import (
@@ -36,7 +37,7 @@ def parse_args():
     return parser.parse_args()
 
 args = parse_args()
-channel = grpc.insecure_channel('localhost:50051')
+channel = grpc.insecure_channel('localhost:50052')
 stub = pb2_grpc.ExperimentServiceStub(channel)
 ui_state = UIState(args.root_directory)
 
@@ -645,106 +646,118 @@ def update_sample_bounds(origin):
 )
 def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_linear_values,
                         all_cb_ids, all_cb_vals):
-    values = checklist_values or []
-    global_heatmap_enabled = ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
-    if not global_heatmap_enabled:
-        return no_update, {'display': 'none'}
+    with ScopeTimer('Complete render_layer_heatmap callback') as complete:
+        values = checklist_values or []
+        global_heatmap_enabled = ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
+        if not global_heatmap_enabled:
+            return no_update, {'display': 'none'}
 
-    if not heatmap_id or 'layer_id' not in heatmap_id:
-        return no_update, {'display': 'none'}
+        if not heatmap_id or 'layer_id' not in heatmap_id:
+            return no_update, {'display': 'none'}
 
-    layer_id = int(heatmap_id['layer_id'])
+        layer_id = int(heatmap_id['layer_id'])
 
-    is_layer_checked = False
-    try:
-        for cid, cval in zip(all_cb_ids or [], all_cb_vals or []):
-            lid = int(cid.get('layer_id')) if isinstance(cid, dict) else None
-            if lid == layer_id:
-                is_layer_checked = bool(cval)
-                break
-    except Exception:
         is_layer_checked = False
-
-    if not is_layer_checked:
-        return no_update, {'display': 'none'}
-
-    linear_shape_text = None
-    if all_linear_ids and all_linear_values:
         try:
-            id_to_val = {
-                (i.get('layer_id') if isinstance(i, dict) else None): v
-                for i, v in zip(all_linear_ids, all_linear_values)
-            }
-            linear_shape_text = id_to_val.get(layer_id, None)
+            for cid, cval in zip(all_cb_ids or [], all_cb_vals or []):
+                lid = int(cid.get('layer_id')) if isinstance(cid, dict) else None
+                if lid == layer_id:
+                    is_layer_checked = bool(cval)
+                    break
         except Exception:
-            linear_shape_text = None
+            is_layer_checked = False
 
-    resp = stub.GetWeights(pb2.WeigthsRequest(
-        neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
-    ))
+        if not is_layer_checked:
+            return no_update, {'display': 'none'}
 
-    if not resp.success:
-        msg = getattr(resp, "error_message", "Unknown error")
-        block = html.Div([html.Small(msg)],
-                         style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
-        return [block], {'display': 'block'}
+        linear_shape_text = None
+        if all_linear_ids and all_linear_values:
+            try:
+                id_to_val = {
+                    (i.get('layer_id') if isinstance(i, dict) else None): v
+                    for i, v in zip(all_linear_ids, all_linear_values)
+                }
+                linear_shape_text = id_to_val.get(layer_id, None)
+            except Exception:
+                linear_shape_text = None
+        with ScopeTimer('grpc call:') as grpc_call:
+            resp = stub.GetWeights(pb2.WeigthsRequest(
+                neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
+            ))
 
-    layer_type = (resp.layer_type or "").strip()
-    C_in, C_out = int(resp.incoming), int(resp.outgoing)
-    w = np.array(resp.weights, dtype=np.float32)
-
-    tiles_by_neuron: list[list[np.ndarray]] = []
-
-    if "Conv2d" in layer_type:
-        K = int(resp.kernel_size or 0)
-        expected = C_out * C_in * K * K
-        if K <= 0 or w.size != expected:
-            msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
-                f"(C_out={C_out}, C_in={C_in}, K={K})")
-            block = html.Div([html.Small(msg)],
-                            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
-            return [block], {'display': 'block'}
-        w = w.reshape(C_out, C_in, K, K)
-        for out_id in range(C_out):
-            tiles_by_neuron.append([w[out_id, in_id] for in_id in range(C_in)])
-
-    else:
-        expected = C_out * C_in
-        if w.size != expected:
-            msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
-                f"(C_out={C_out}, C_in={C_in})")
+        if not resp.success:
+            msg = getattr(resp, "error_message", "Unknown error")
             block = html.Div([html.Small(msg)],
                             style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
             return [block], {'display': 'block'}
 
-        w = w.reshape(C_out, C_in)  # (out, in)
-        CHW = _parse_chw(linear_shape_text)
-        can_reshape = CHW is not None and (CHW[0] * CHW[1] * CHW[2] == C_in)
+        layer_type = (resp.layer_type or "").strip()
+        C_in, C_out = int(resp.incoming), int(resp.outgoing)
+        w = np.array(resp.weights, dtype=np.float32)
 
-        if can_reshape:
-            C, H, W = CHW
-            for out_id in range(C_out):
-                vol = w[out_id, :].reshape(C, H, W)      # (C,H,W)
-                tiles_by_neuron.append([vol[c] for c in range(C)])  # one H×W per input channel
-        else:
-            for out_id in range(C_out):
-                strip = _downsample_strip(w[out_id, :].reshape(1, C_in), max_len=256)
-                tiles_by_neuron.append([strip])
+        tiles_by_neuron: list[list[np.ndarray]] = []
 
-    rows = []
-    for row_tiles in tiles_by_neuron:
-        row_imgs = []
-        for z in row_tiles:
-            row_imgs.append(
-                html.Div(_tile_img_component(z), style={'display': 'inline-block', 'marginRight': '4px'})
-            )
-        rows.append(
-            html.Div(row_imgs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'})
-        )
+        with ScopeTimer('process response, unpack and reshape:') as unpack:
+            if "Conv2d" in layer_type:
+                K = int(resp.kernel_size or 0)
+                expected = C_out * C_in * K * K
+                if K <= 0 or w.size != expected:
+                    msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
+                        f"(C_out={C_out}, C_in={C_in}, K={K})")
+                    block = html.Div([html.Small(msg)],
+                                    style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+                    return [block], {'display': 'block'}
+                w = w.reshape(C_out, C_in, K, K)
+                for out_id in range(C_out):
+                    tiles_by_neuron.append([w[out_id, in_id] for in_id in range(C_in)])
 
-    block = html.Div(rows, style={
-        'borderTop': '1px solid #eee', 'paddingTop': '6px', 'paddingRight': '6px'
-    })
+            else:
+                expected = C_out * C_in
+                if w.size != expected:
+                    msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
+                        f"(C_out={C_out}, C_in={C_in})")
+                    block = html.Div([html.Small(msg)],
+                                    style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+                    return [block], {'display': 'block'}
+
+                w = w.reshape(C_out, C_in)  # (out, in)
+                CHW = _parse_chw(linear_shape_text)
+                can_reshape = CHW is not None and (CHW[0] * CHW[1] * CHW[2] == C_in)
+
+                if can_reshape:
+                    C, H, W = CHW
+                    for out_id in range(C_out):
+                        vol = w[out_id, :].reshape(C, H, W)      # (C,H,W)
+                        tiles_by_neuron.append([vol[c] for c in range(C)])  # one H×W per input channel
+                else:
+                    for out_id in range(C_out):
+                        strip = _downsample_strip(w[out_id, :].reshape(1, C_in), max_len=256)
+                        tiles_by_neuron.append([strip])
+
+        with ScopeTimer('build tiles (map+encode+components)') as t_tiles:
+            rows = []
+            tile_count = 0
+            for row_tiles in tiles_by_neuron:
+                row_imgs = []
+                for z in row_tiles:
+                    with ScopeTimer('one tile -> image component') as one_tile:
+                        img_comp = _tile_img_component(z)
+                    row_imgs.append(
+                        html.Div(img_comp, style={'display': 'inline-block', 'marginRight': '4px'})
+                    )
+                    tile_count += 1
+                rows.append(
+                    html.Div(row_imgs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'})
+                )
+
+        block = html.Div(rows, style={
+            'borderTop': '1px solid #eee', 'paddingTop': '6px', 'paddingRight': '6px'
+        })
+    print(complete)
+    print(grpc_call)
+    print(unpack)
+    print(t_tiles)
+
     return [block], {'display': 'block'}
 
 

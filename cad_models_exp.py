@@ -130,15 +130,30 @@ class ConvNet(NetworkWithOps, nn.Module):
         return out
 
 
-transform = T.Compose([T.ToTensor(),])
-# root_dir = "/home/rotaru/Desktop/GRAYBOX/sales/pitch/prepare/cad_models_dataset_split/"
-root_dir = "/home/rotaru/Desktop/GRAYBOX/repos/datasets/robotics/ycb_datasets/"
+IM_MEAN = (0.6312528, 0.4949005, 0.3298562)
+IM_STD  = (0.0721354, 0.0712461, 0.0598827)
+
+train_transform = T.Compose([
+    T.ToTensor(),
+    T.Normalize(IM_MEAN, IM_STD),
+])
+
+val_transform = T.Compose([
+    T.ToTensor(),
+    T.Normalize(IM_MEAN, IM_STD),
+])
+
+root_dir = 'ycb_datasets'
+
+train_dataset = ds.ImageFolder(os.path.join(root_dir, "train"), transform=train_transform)
+val_dataset   = ds.ImageFolder(os.path.join(root_dir, "val"),   transform=val_transform)
 
 
 train_dataset = ds.ImageFolder(
-    os.path.join(root_dir, "train"), transform=transform)
+    os.path.join(root_dir, "train"), transform=train_transform)
 val_dataset = ds.ImageFolder(
-    os.path.join(root_dir, "val"), transform=transform)
+    os.path.join(root_dir, "val"), transform=val_transform)
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -161,6 +176,7 @@ def get_exp():
         metrics=metrics,
         root_log_dir='cad_models',
         logger=Dash("cad_models"),
+        criterion = nn.CrossEntropyLoss(reduction='none'),
         skip_loading=False)
 
     def stateful_difference_monitor_callback():

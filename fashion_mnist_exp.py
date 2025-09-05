@@ -129,15 +129,15 @@ def get_exp():
         batch_size=100,
         criterion=nn.CrossEntropyLoss(reduction='none'),
         metrics=metrics,
-        training_steps_to_do=1000,
+        training_steps_to_do=25600,
         name="v0",
-        root_log_dir='mnist',
-        logger=Dash("mnist"),
+        root_log_dir='test_mnist',
+        logger=Dash("test_mnist"),
         skip_loading=False)
 
-    def stateful_difference_monitor_callback():
-        exp.display_stats()
+    # def stateful_difference_monitor_callback():
+    #     exp.display_stats()
 
-    exp.register_train_loop_callback(stateful_difference_monitor_callback)
+    # exp.register_train_loop_callback(stateful_difference_monitor_callback)
 
     return exp

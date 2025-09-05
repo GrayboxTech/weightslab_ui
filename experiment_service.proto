@@ -280,6 +280,8 @@ message WeigthsRequest{
   bool with_learning_rate = 3;
   bool with_incoming_learning_rates = 4;
   bool include_gradients = 5;
+  optional int32 start_neuron_idx = 6; 
+  optional int32 end_neuron_idx = 7; 
 }
 
 message WeightsResponse{
