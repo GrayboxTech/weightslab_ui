@@ -54,17 +54,26 @@ class ConvNet(NetworkWithOps, nn.Module):
         self.conv5 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
         self.bnorm5 = BatchNorm2dWithNeuronOps(4)
 
+        # Convolution block 6
+        self.conv6 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
+        self.bnorm6 = BatchNorm2dWithNeuronOps(4)
+
+        # Convolution block 7
+        self.conv7 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
+        self.bnorm7 = BatchNorm2dWithNeuronOps(4)
+
         # Fully connected output
-        self.fc = LinearWithNeuronOps(256, 78)
+        self.fc = LinearWithNeuronOps(16, 78)
 
     def children(self):
         return [
             self.conv1, self.bnorm1, self.conv2, self.bnorm2,
             self.conv3, self.bnorm3, self.conv4, self.bnorm4,
-            self.conv5, self.bnorm5,
+            self.conv5, self.bnorm5, self.conv6, self.bnorm6,
+            self.conv7, self.bnorm7,
             self.fc
         ]
-        
+
     def define_deps(self):
         self.register_dependencies([
             (self.conv1, self.bnorm1, DepType.SAME),
@@ -76,11 +85,14 @@ class ConvNet(NetworkWithOps, nn.Module):
             (self.conv4, self.bnorm4, DepType.SAME),
             (self.bnorm4, self.conv5, DepType.INCOMING),
             (self.conv5, self.bnorm5, DepType.SAME),
-            (self.bnorm5, self.fc, DepType.INCOMING),
+            (self.bnorm5, self.conv6, DepType.INCOMING),
+            (self.conv6, self.bnorm6, DepType.SAME),
+            (self.bnorm6, self.conv7, DepType.INCOMING),
+            (self.conv7, self.bnorm7, DepType.SAME),
+            (self.bnorm7, self.fc, DepType.INCOMING),
         ])
 
-        self.flatten_conv_id = self.bnorm5.get_module_id()
-
+        self.flatten_conv_id = self.bnorm7.get_module_id()
 
     def forward(self, x):
         self.maybe_update_age(x)
@@ -104,27 +116,29 @@ class ConvNet(NetworkWithOps, nn.Module):
         x = F.relu(self.bnorm5(self.conv5(x)))
         x = F.max_pool2d(x, 2)  # 16 -> 8
 
+        # Block 6
+        x = F.relu(self.bnorm6(self.conv6(x)))
+        x = F.max_pool2d(x, 2)  # 8 -> 4
+
+        # Block 7
+        x = F.relu(self.bnorm7(self.conv7(x)))
+        x = F.max_pool2d(x, 2)  # 4 -> 2
+
         # Flatten
-        x = x.view(x.size(0), -1)  # shape = [batch_size, 8*4*4]
+        x = x.view(x.size(0), -1)  # shape = [batch_size, 4*4*4]
         out = self.fc(x)
         return out
 
 
-transform = T.Compose([
-    # T.Resize((224, 224)),
-    T.ToTensor(),
-])
+transform = T.Compose([T.ToTensor(),])
 # root_dir = "/home/rotaru/Desktop/GRAYBOX/sales/pitch/prepare/cad_models_dataset_split/"
-
 root_dir = "/home/rotaru/Desktop/GRAYBOX/repos/datasets/robotics/ycb_datasets/"
-
 
 
 train_dataset = ds.ImageFolder(
     os.path.join(root_dir, "train"), transform=transform)
 val_dataset = ds.ImageFolder(
     os.path.join(root_dir, "val"), transform=transform)
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
