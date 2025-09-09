@@ -37,7 +37,6 @@ import base64
 from io import BytesIO
 from PIL import Image
 from collections import defaultdict
-from dash import dash_table
 from dash.dash_table.Format import Format, Scheme
 from scope_timer import ScopeTimer
 from dataclasses import dataclass
@@ -1095,7 +1094,6 @@ def get_layer_div(
     except Exception as e:
         return no_update
 
-    # --- NEW: small per-layer checkbox to enable fetching filters for this layer ---
     fetch_filters_toggle = html.Div(
         dbc.Checkbox(
             id={'type': 'layer-heatmap-checkbox', 'layer_id': int(layer_row['layer_id'])},
@@ -1104,6 +1102,18 @@ def get_layer_div(
         ),
         style={'display': 'inline-block', 'marginLeft': '6px', 'verticalAlign': 'middle'},
         title="Fetch filter weights/heatmaps for this layer (throttled & limited)"
+    )
+
+    neuron_range_input = html.Div(
+        dbc.Input(
+            id={'type': 'layer-neuron-range', 'layer_id': int(layer_row['layer_id'])},
+            type='text',
+            placeholder='[0-10]',
+            style={'width': '9ch', 'marginLeft': '8px'},
+            debounce=True 
+        ),
+        style={'display': 'inline-block', 'verticalAlign': 'middle'},
+        title="Limit rendered neurons: e.g. 0:23 (inclusive)"
     )
 
     linear_input_box = None
@@ -1156,7 +1166,7 @@ def get_layer_div(
                 ],
             ),
         ],
-        style={"flex": "1 1 auto", "minWidth": 0}
+        style={"flex": "1 1 50%", "minWidth": "50%"}
     )
 
     side_panel = html.Div(
@@ -1167,6 +1177,7 @@ def get_layer_div(
                     html.Span("", style={'flex': '1 1 auto'}), 
                     html.Small("Fetch filters", style={'marginRight': '6px'}),
                     fetch_filters_toggle,
+                    neuron_range_input
                 ],
                 style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'flex-end',
                     'gap': '6px', 'marginBottom': '4px'}
@@ -1186,7 +1197,8 @@ def get_layer_div(
         style={
             'display': 'none',
             'maxHeight': '300px',
-            'overflowY': 'auto'
+            'overflowY': 'auto',
+            'flex': '1 1 50%',
         }
     )
 
@@ -1440,6 +1452,33 @@ def _make_heatmap_figure(z, zmin=None, zmax=None):
         xaxis_showgrid=False, yaxis_showgrid=False,
         xaxis_visible=False, yaxis_visible=False,
     )
+
+def _parse_neuron_range(text):
+    if not text or not isinstance(text, str):
+        return None
+    s = text.strip().strip('[](){}')
+    if not s:
+        return None
+    parts = [p.strip() for p in s.split(',')] if ',' in s else [s]
+    out = set()
+    import re
+    for p in parts:
+        m = re.match(r'^(\d+)\s*[:-]\s*(\d+)$', p)
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            if a > b: a, b = b, a
+            out.update(range(a, b + 1)) 
+        elif re.match(r'^\d+$', p):
+            out.add(int(p))
+        else:
+            return None  
+    return sorted(out) if out else None
+
+
+def _make_out_ids(C_out: int, selected_neuron_ids):
+    if selected_neuron_ids is None:
+        return list(range(C_out))
+    return [i for i in selected_neuron_ids if 0 <= i < C_out]
 
 def get_plots_div():
     experiment_checkboxes = dcc.Checklist(
@@ -2081,7 +2120,7 @@ def main():
     args = parse_args()
 
     channel = grpc.insecure_channel(
-        'localhost:50052',
+        'localhost:50051',
         options=[('grpc.max_receive_message_length', 32 * 1024 * 1024)]
     )
     stub = pb2_grpc.ExperimentServiceStub(channel)
@@ -2736,14 +2775,18 @@ def main():
         Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'style'),
         Input('weights-fetch-freq', 'n_intervals'),                      
         Input('neuron_stats-checkboxes', 'value'),
+        Input({'type': 'layer-neuron-range', 'layer_id': ALL}, 'n_submit'),
         State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
         State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'id'),
         State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'value'),
-        State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'id'),     
+        State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'id'),
         State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'value'),
+        State({'type': 'layer-neuron-range', 'layer_id': ALL}, 'id'),
+        State({'type': 'layer-neuron-range', 'layer_id': ALL}, 'value'),
     )
-    def render_layer_heatmap(_, checklist_values, heatmap_id, all_linear_ids, all_linear_values,
-                            all_cb_ids, all_cb_vals):
+    def render_layer_heatmap(_, checklist_values, submit_counts,  heatmap_id, all_linear_ids, all_linear_values,
+                            all_cb_ids, all_cb_vals,
+                            all_range_ids, all_range_vals):
         values = checklist_values or []
         global_heatmap_enabled = ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
         if not global_heatmap_enabled:
@@ -2763,7 +2806,6 @@ def main():
                     break
         except Exception:
             is_layer_checked = False
-
         if not is_layer_checked:
             return no_update, {'display': 'none'}
 
@@ -2778,19 +2820,32 @@ def main():
             except Exception:
                 linear_shape_text = None
 
+        neuron_range_text = None
+        if all_range_ids and all_range_vals:
+            try:
+                id_to_val = {
+                    (i.get('layer_id') if isinstance(i, dict) else None): v
+                    for i, v in zip(all_range_ids, all_range_vals)
+                }
+                neuron_range_text = id_to_val.get(layer_id, None)
+            except Exception:
+                neuron_range_text = None
+        selected_neuron_ids = _parse_neuron_range(neuron_range_text)
+
         resp = stub.GetWeights(pb2.WeigthsRequest(
             neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
         ))
-
         if not resp.success:
             msg = getattr(resp, "error_message", "Unknown error")
             block = html.Div([html.Small(msg)],
-                            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+                                style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
             return [block], {'display': 'block'}
 
         layer_type = (resp.layer_type or "").strip()
         C_in, C_out = int(resp.incoming), int(resp.outgoing)
         w = np.array(resp.weights, dtype=np.float32)
+
+        out_ids = _make_out_ids(C_out, selected_neuron_ids)
 
         tiles_by_neuron: list[list[np.ndarray]] = []
 
@@ -2799,21 +2854,22 @@ def main():
             expected = C_out * C_in * K * K
             if K <= 0 or w.size != expected:
                 msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
-                    f"(C_out={C_out}, C_in={C_in}, K={K})")
+                        f"(C_out={C_out}, C_in={C_in}, K={K})")
                 block = html.Div([html.Small(msg)],
-                                style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+                                    style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
                 return [block], {'display': 'block'}
+
             w = w.reshape(C_out, C_in, K, K)
-            for out_id in range(C_out):
+            for out_id in out_ids:
                 tiles_by_neuron.append([w[out_id, in_id] for in_id in range(C_in)])
 
         else:
             expected = C_out * C_in
             if w.size != expected:
                 msg = (f"Unexpected weight shape: got {w.size}, expected {expected} "
-                    f"(C_out={C_out}, C_in={C_in})")
+                        f"(C_out={C_out}, C_in={C_in})")
                 block = html.Div([html.Small(msg)],
-                                style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+                                    style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
                 return [block], {'display': 'block'}
 
             w = w.reshape(C_out, C_in)  # (out, in)
@@ -2822,27 +2878,37 @@ def main():
 
             if can_reshape:
                 C, H, W = CHW
-                for out_id in range(C_out):
+                for out_id in out_ids:
                     vol = w[out_id, :].reshape(C, H, W)      # (C,H,W)
                     tiles_by_neuron.append([vol[c] for c in range(C)])  # one H×W per input channel
             else:
-                for out_id in range(C_out):
+                for out_id in out_ids:
                     strip = _downsample_strip(w[out_id, :].reshape(1, C_in), max_len=256)
                     tiles_by_neuron.append([strip])
 
         rows = []
-        tile_count = 0
-        for row_tiles in tiles_by_neuron:
-            row_imgs = []
-            for z in row_tiles:
-                with ScopeTimer('one tile -> image component') as one_tile:
-                    img_comp = _tile_img_component(z)
-                row_imgs.append(
-                    html.Div(img_comp, style={'display': 'inline-block', 'marginRight': '4px'})
-                )
-                tile_count += 1
+        for out_id, row_tiles in zip(out_ids, tiles_by_neuron):
+            id_badge = html.Div(
+                str(out_id),
+                style={
+                    'minWidth': '32px', 'textAlign': 'right', 'marginRight': '6px',
+                    'fontFamily': 'monospace', 'fontSize': '12px', 'color': '#666'
+                }
+            )
+
+            row_imgs = [
+                html.Div(_tile_img_component(z),
+                            style={'display': 'inline-block', 'marginRight': '4px'})
+                for z in row_tiles
+            ]
+            tiles_scroller = html.Div(
+                row_imgs,
+                style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'}
+            )
+
             rows.append(
-                html.Div(row_imgs, style={'whiteSpace': 'nowrap', 'overflowX': 'auto', 'marginBottom': '6px'})
+                html.Div([id_badge, tiles_scroller],
+                            style={'display': 'flex', 'alignItems': 'center'})
             )
 
         block = html.Div(rows, style={
@@ -3097,9 +3163,9 @@ def main():
         Output('train-sample-panel', 'children'),
         Output('eval-sample-panel', 'children'),
         Input('train-data-table', 'derived_viewport_data'),
-        State('train-data-table', 'derived_viewport_selected_rows'),
+        Input('train-data-table', 'derived_viewport_selected_rows'),
         Input('eval-data-table', 'derived_viewport_data'),
-        State('eval-data-table', 'derived_viewport_selected_rows'),
+        Input('eval-data-table', 'derived_viewport_selected_rows'),
         Input('sample-inspect-checkboxes', 'value'),
         Input('eval-sample-inspect-checkboxes', 'value'),
         Input('data-tabs', 'value'),
