@@ -2415,12 +2415,22 @@ def main():
         )
         stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=add_op))
 
+        state = stub.ExperimentCommand(pb2.TrainerCommand(
+            get_interactive_layers=True,
+            get_hyper_parameters=False,
+        ))
+        ui_state.update_from_server_state(state)
+
         if next_layer_id is None or old_incoming is None:
             return 
 
-        new_from_ids = list(range(old_incoming, old_incoming + n_add))
+        new_incoming = _get_incoming_count(ui_state, next_layer_id)
+        if new_incoming <= old_incoming:
+            return
 
-        selected_to_ids = ui_state.selected_neurons[next_layer_id] or []
+        new_from_ids = list(range(old_incoming, new_incoming))
+
+        selected_to_ids = ui_state.selected_neurons.get(next_layer_id, []) or []
         predicates = []
         if zerofy_opts:
             if 'frozen' in zerofy_opts:
