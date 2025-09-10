@@ -20,3 +20,6 @@ fashion-mnist-demo/*
 hct-dev/*
 root_experiment/*
 *_exp.py
+mnist\ (another copy)/*
+mnist\ (copy)/*
+requirements\ copy.txt
