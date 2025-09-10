@@ -1868,18 +1868,18 @@ def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_select
         'opacity': 0.25 if is_discarded else 1.0  
     })
 
-def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin, discarded_ids=None):
+def render_images(ui_state: UIState, stub, sample_ids, origin,
+                    discarded_ids=None, selected_ids=None):
+    selected_ids = set(selected_ids or [])
     task_type = getattr(ui_state, "task_type", "classification")
     imgs = []
     num_images = len(sample_ids)
     cols = isqrt(num_images) or 1
     rows = cols
     img_size = int(512 / max(cols, rows))
-    if origin == "train":
-        df = ui_state.samples_df
-    else:
-        df = ui_state.eval_samples_df
-    id_to_loss = {int(row["SampleId"]): row.get("LastLoss", None) for _, row in df.iterrows()}
+
+    df = ui_state.samples_df if origin == "train" else ui_state.eval_samples_df
+    id_to_loss = {int(r["SampleId"]): r.get("LastLoss", None) for _, r in df.iterrows()}
 
     try:
         batch_response = stub.GetSamples(pb2.BatchSampleRequest(
@@ -1888,61 +1888,63 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin, dis
             resize_width=img_size,
             resize_height=img_size
         ))
-        if task_type == "segmentation":
+
+        if task_type == "classification":
             for sample in batch_response.samples:
-                sid = sample.sample_id
-                input_b64 = base64.b64encode(sample.raw_data).decode('utf-8')
-                gt_mask_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
-                pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
-                is_selected = sid in selected_ids
-                is_discarded = sid in (discarded_ids or set())
-                last_loss = id_to_loss.get(sid, None)
-                triplet = render_segmentation_triplet(ui_state, stub, input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded, sid, last_loss)
-                clickable = html.Div(
-                    [
-                        triplet,
-                        html.Div(
-                            f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -",
-                            style={'fontSize': '11px', 'lineHeight': '15px',
-                                'textAlign': 'center', 'marginTop': '2px'}
-                        )
-                    ],
-                    id={'type': 'sample-img', 'origin': origin, 'sid': sid},
-                    n_clicks=0,
-                    style={'cursor': 'pointer', 'width': f'{img_size*3 + 12}px',
-                        'display': 'flex', 'flexDirection': 'column',
-                        'alignItems': 'center'}
-                )
-                imgs.append(clickable)
-
-
-
-        else:
-            for sample in batch_response.samples:
-                sid = sample.sample_id
+                sid = int(sample.sample_id)
                 b64 = base64.b64encode(sample.raw_data).decode('utf-8')
-                is_selected = sid in selected_ids
                 is_discarded = sid in (discarded_ids or set())
-                border = '4px solid red' if is_selected else '1px solid #ccc'
+
                 img_style = {
                     'width': f'{img_size}px',
                     'height': f'{img_size}px',
                     'margin': '0.1vh',
-                    'border': border,
-                    'transition': 'border 0.3s, opacity 0.3s',
+                    'border': '1px solid #ccc',           
+                    'boxSizing': 'border-box',
                     'objectFit': 'contain',
                     'imageRendering': 'auto',
-                    'opacity': 0.25 if is_discarded else 1.0
+                    'opacity': 0.25 if is_discarded else 1.0,
+                    'transition': 'box-shadow 0.06s, opacity 0.1s',
+                    'boxShadow': '0 0 0 3px rgba(255,45,85,0.95)' if sid in selected_ids else 'none'
                 }
+
+                img = html.Img(
+                    id={'type': 'sample-img-el', 'origin': origin, 'sid': sid},
+                    src=f'data:image/png;base64,{b64}',
+                    style=img_style
+                )
+
                 clickable = html.Div(
-                    label_below_img(html.Img(src=f'data:image/png;base64,{b64}', style=img_style),
-                                    id_to_loss.get(sid, None), img_size),
-                    id={'type': 'sample-img', 'origin': origin, 'sid': int(sid)},
+                    label_below_img(img, id_to_loss.get(sid, None), img_size),
+                    id={'type': 'sample-img', 'origin': origin, 'sid': sid},
                     n_clicks=0,
-                    style={'cursor': 'pointer'}  # visual cue
+                    style={'cursor': 'pointer'}  
                 )
                 imgs.append(clickable)
 
+        else:
+            for sample in batch_response.samples:
+                sid = int(sample.sample_id)
+                input_b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+                gt_mask_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
+                pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
+                is_discarded = sid in (discarded_ids or set())
+                last_loss = id_to_loss.get(sid, None)
+
+                triplet = render_segmentation_triplet(
+                    input_b64, gt_mask_b64, pred_mask_b64,
+                    is_selected=False,             
+                    img_size=img_size,
+                    is_discarded=is_discarded,
+                    sid=sid, last_loss=last_loss
+                )
+                clickable = html.Div(
+                    [triplet],
+                    id={'type': 'sample-img', 'origin': origin, 'sid': sid},
+                    n_clicks=0,
+                    style={'cursor': 'pointer'}
+                )
+                imgs.append(clickable)
 
     except Exception as e:
         print(f"[ERROR] {origin} sample rendering failed: {e}")
@@ -1956,7 +1958,7 @@ def render_images(ui_state: UIState, stub, sample_ids, selected_ids, origin, dis
         'rowGap': '0.1vh',
         'width': '100%',
         'height': 'auto',
-        'maxWidth': 'calc(100vw - 40vw)', 
+        'maxWidth': 'calc(100vw - 40vw)',
         'boxSizing': 'border-box',
         'justifyItems': 'center',
         'alignItems': 'center',
@@ -3173,39 +3175,37 @@ def main():
         Output('train-sample-panel', 'children'),
         Output('eval-sample-panel', 'children'),
         Input('train-data-table', 'derived_viewport_data'),
-        Input('train-data-table', 'derived_viewport_selected_rows'),
         Input('eval-data-table', 'derived_viewport_data'),
-        Input('eval-data-table', 'derived_viewport_selected_rows'),
         Input('sample-inspect-checkboxes', 'value'),
         Input('eval-sample-inspect-checkboxes', 'value'),
         Input('data-tabs', 'value'),
+        State('train-image-selected-ids', 'data'), 
+        State('eval-image-selected-ids', 'data'),  
         prevent_initial_call=True
     )
     def render_samples(
-        train_viewport, train_viewport_sel,
-        eval_viewport, eval_viewport_sel,
-        train_flags, eval_flags,
-        tab
+        train_viewport, eval_viewport, train_flags, eval_flags, tab,
+        train_selected_ids, eval_selected_ids
     ):
         panels = [no_update, no_update]
         nonlocal ui_state, stub
-        if tab == 'train' and 'inspect_sample_on_click' in train_flags and train_viewport:
+
+        if tab == 'train' and 'inspect_sample_on_click' in (train_flags or []) and train_viewport:
             ids = [row['SampleId'] for row in train_viewport]
-            selected_ids = set(
-                train_viewport[i]['SampleId'] for i in (train_viewport_sel or []) if 0 <= i < len(train_viewport)
-            )
             discarded_ids = set(ui_state.samples_df.loc[ui_state.samples_df['Discarded'], 'SampleId'])
-            panels[0] = render_images(ui_state, stub, ids, selected_ids, origin='train', discarded_ids=discarded_ids)
-        elif tab == 'eval' and 'inspect_sample_on_click' in eval_flags and eval_viewport:
+            panels[0] = render_images(ui_state, stub, ids, origin='train',
+                                    discarded_ids=discarded_ids,
+                                    selected_ids=(train_selected_ids or []))
+
+        elif tab == 'eval' and 'inspect_sample_on_click' in (eval_flags or []) and eval_viewport:
             ids = [row['SampleId'] for row in eval_viewport]
-            selected_ids = set(
-                eval_viewport[i]['SampleId'] for i in (eval_viewport_sel or []) if 0 <= i < len(eval_viewport)
-            )
             discarded_ids = set(ui_state.eval_samples_df.loc[ui_state.eval_samples_df['Discarded'], 'SampleId'])
-            panels[1] = render_images(ui_state, stub, ids, selected_ids, origin='eval', discarded_ids=discarded_ids)
+            panels[1] = render_images(ui_state, stub, ids, origin='eval',
+                                    discarded_ids=discarded_ids,
+                                    selected_ids=(eval_selected_ids or []))
         return panels
-    
-    # TRAIN: click a triplet -> toggle its sid in the store
+
+
     @app.callback(
         Output('train-image-selected-ids', 'data', allow_duplicate=True),
         Input({'type': 'sample-img', 'origin': 'train', 'sid': ALL}, 'n_clicks'),
@@ -3225,21 +3225,32 @@ def main():
         return current_ids + [sid]
 
 
-    # TRAIN: store -> table.selected_rows (map by SampleId over current data)
     @app.callback(
         Output('train-data-table', 'selected_rows', allow_duplicate=True),
         Input('train-image-selected-ids', 'data'),
-        State('train-data-table', 'data'),
+        Input('train-data-table', 'data'),          
         prevent_initial_call=True
     )
     def restore_train_selected_rows(selected_ids, data):
-        if not selected_ids or not data:
+        if not data:
             return []
+        selected_ids = selected_ids or []
         id2idx = {row['SampleId']: idx for idx, row in enumerate(data)}
         return [id2idx[sid] for sid in selected_ids if sid in id2idx]
 
+    @app.callback(
+        Output('eval-data-table', 'selected_rows', allow_duplicate=True),
+        Input('eval-image-selected-ids', 'data'),
+        Input('eval-data-table', 'data'),           
+        prevent_initial_call=True
+    )
+    def restore_eval_selected_rows(selected_ids, data):
+        if not data:
+            return []
+        selected_ids = selected_ids or []
+        id2idx = {row['SampleId']: idx for idx, row in enumerate(data)}
+        return [id2idx[sid] for sid in selected_ids if sid in id2idx]
 
-    # EVAL: same wiring
     @app.callback(
         Output('eval-image-selected-ids', 'data', allow_duplicate=True),
         Input({'type': 'sample-img', 'origin': 'eval', 'sid': ALL}, 'n_clicks'),
@@ -3257,19 +3268,6 @@ def main():
         if sid in current_ids:
             return [x for x in current_ids if x != sid]
         return current_ids + [sid]
-
-
-    @app.callback(
-        Output('eval-data-table', 'selected_rows', allow_duplicate=True),
-        Input('eval-image-selected-ids', 'data'),
-        State('eval-data-table', 'data'),
-        prevent_initial_call=True
-    )
-    def restore_eval_selected_rows(selected_ids, data):
-        if not selected_ids or not data:
-            return []
-        id2idx = {row['SampleId']: idx for idx, row in enumerate(data)}
-        return [id2idx[sid] for sid in selected_ids if sid in id2idx]
 
     @app.callback(
         Output('train-data-table', 'data', allow_duplicate=True),
@@ -3313,34 +3311,51 @@ def main():
             return []
         return [viewport_data[i]['SampleId'] for i in view_sel_rows if 0 <= i < len(viewport_data)]
 
-
     @app.callback(
-        Output('train-data-table', 'selected_rows', allow_duplicate=True),
+        Output({'type': 'sample-img-el', 'origin': 'train', 'sid': ALL}, 'style'),
         Input('train-image-selected-ids', 'data'),
-        Input('train-data-table', 'data'),
+        Input('train-sample-panel', 'children'),  
+        State({'type': 'sample-img-el', 'origin': 'train', 'sid': ALL}, 'id'),
+        State({'type': 'sample-img-el', 'origin': 'train', 'sid': ALL}, 'style'),
         prevent_initial_call=True
     )
-    def restore_selected_rows(selected_ids, data):
-        if not selected_ids or not data:
-            return []
-        id2idx = {row['SampleId']: idx for idx, row in enumerate(data)}
-        return [id2idx[sid] for sid in selected_ids if sid in id2idx]
+    def update_train_img_highlight(selected_ids, _children, ids, styles):
+        sel = set(selected_ids or [])
+        out = []
+        for cid, st in zip(ids or [], styles or []):
+            s = dict(st or {})
+            try:
+                sid = int(cid.get('sid'))
+                s['boxShadow'] = '0 0 0 3px rgba(255,45,85,0.95)' if sid in sel else 'none'
+                s.setdefault('transition', 'box-shadow 0.06s, opacity 0.1s')
+            except Exception:
+                pass
+            out.append(s)
+        return out
 
+        
     @app.callback(
-        Output('train-data-table', 'style_data_conditional'),
-        Input('train-data-table', 'derived_viewport_selected_rows'),
-        State('train-data-table', 'derived_viewport_data')
+        Output({'type': 'sample-img-el', 'origin': 'eval', 'sid': ALL}, 'style'),
+        Input('eval-image-selected-ids', 'data'),
+        Input('eval-sample-panel', 'children'),
+        State({'type': 'sample-img-el', 'origin': 'eval', 'sid': ALL}, 'id'),
+        State({'type': 'sample-img-el', 'origin': 'eval', 'sid': ALL}, 'style'),
+        prevent_initial_call=True
     )
-    def highlight_selected(view_sel_rows, viewport_data):
-        if not view_sel_rows or not viewport_data:
-            return []
-        sample_ids = [viewport_data[i]['SampleId'] for i in view_sel_rows if 0 <= i < len(viewport_data)]
-        filter_query = ' || '.join([f'{{SampleId}} = {sid}' for sid in sample_ids])
-        return [{
-            "if": {"filter_query": filter_query},
-            "backgroundColor": "#ffe6b3",
-            "fontWeight": "bold"
-        }] if sample_ids else []
+    def update_eval_img_highlight(selected_ids, _children, ids, styles):
+        sel = set(selected_ids or [])
+        out = []
+        for cid, st in zip(ids or [], styles or []):
+            s = dict(st or {})
+            try:
+                sid = int(cid.get('sid'))
+                s['boxShadow'] = '0 0 0 3px rgba(255,45,85,0.95)' if sid in sel else 'none'
+                s.setdefault('transition', 'box-shadow 0.06s, opacity 0.1s')
+            except Exception:
+                pass
+            out.append(s)
+        return out
+
 
     @app.callback(
         Output('experiment_checklist', 'options', allow_duplicate=True),
