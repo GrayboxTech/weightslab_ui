@@ -2698,13 +2698,13 @@ def main():
     @app.callback(
         Output({'type': 'layer-activation', 'layer_id': MATCH}, 'children'),
         Output({'type': 'layer-activation', 'layer_id': MATCH}, 'style'),
-        Input('weights-render-freq', 'n_intervals'),
+        # Input('weights-render-freq', 'n_intervals'),
         Input('neuron_stats-checkboxes', 'value'),
         Input('activation-sample-id', 'value'),   
         Input('activation-origin', 'value'),  
         State({'type': 'layer-activation', 'layer_id': MATCH}, 'id'),
     )
-    def render_layer_activation(_, checklist_values, sample_value, origin_value, act_id):
+    def render_layer_activation(checklist_values, sample_value, origin_value, act_id):
         values = checklist_values or []
         if 'show_activation_maps' not in values:
             return dash.no_update, {'display': 'none'}
@@ -2714,21 +2714,24 @@ def main():
         sample_id = int(sample_value) if sample_value is not None else 0
         origin = origin_value or "eval"
         resp = stub.GetActivations(pb2.ActivationRequest(
-            layer_id=layer_id, sample_id=sample_id, origin=origin, pre_activation=True
-        ))
+            layer_id=layer_id, sample_id=sample_id, origin=origin))
 
-        count = int(getattr(resp, "neurons_count", 0) or 0)
-        if count <= 0:
-            block = html.Div([html.Small("No activations available")],
-                            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
-            return [block], {'display': 'block'}
+        print(f"[UI] WeightsLab.render_layer_activation {layer_id}, {sample_id}, {origin} => {str(resp)[:200]}")
+
+        # count = int(getattr(resp, "neurons_count", 0) or 0)
+        # if neurons_count <= 0:
+        #     block = html.Div([html.Small("No activations available")],
+        #                     style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
+        #     return [block], {'display': 'block'}
 
         graphs = []
         if "Conv2d" in (resp.layer_type or ""):
-            for i in range(count):
+            for i in range(resp.neurons_count):
                 amap = resp.activations[i]
                 vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
                 max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
+
+                print(f"conv2d[{i}: ", vals, vals.shape, max_abs)
                 fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
                 graphs.append(
                     html.Div(
@@ -2738,7 +2741,7 @@ def main():
                     )
                 )
         else:
-            scalars = np.array([resp.activations[i].values[0] for i in range(count)], dtype=float)
+            scalars = np.array([resp.activations[i].values[0] for i in range(resp.neurons_count)], dtype=float)
             max_abs = float(np.max(np.abs(scalars))) if scalars.size else 1.0
             z = scalars.reshape(1, -1)  # (1, N)
             fig = _make_heatmap_figure(z, zmin=-max_abs, zmax=+max_abs)
@@ -2765,7 +2768,6 @@ def main():
             style={'borderTop': '1px solid #eee', 'paddingTop': '6px'}
         )
         return [block], {'display': 'block'}
-
 
 
     @app.callback(
@@ -2796,9 +2798,11 @@ def main():
         State({'type': 'layer-neuron-range', 'layer_id': ALL}, 'id'),
         State({'type': 'layer-neuron-range', 'layer_id': ALL}, 'value'),
     )
-    def render_layer_heatmap(_, checklist_values, submit_counts,  heatmap_id, all_linear_ids, all_linear_values,
-                            all_cb_ids, all_cb_vals,
-                            all_range_ids, all_range_vals):
+    def render_layer_heatmap(
+            _, checklist_values, submit_counts,  heatmap_id, all_linear_ids,
+            all_linear_values, all_cb_ids, all_cb_vals, all_range_ids,
+            all_range_vals
+    ):
         values = checklist_values or []
         global_heatmap_enabled = ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
         if not global_heatmap_enabled:

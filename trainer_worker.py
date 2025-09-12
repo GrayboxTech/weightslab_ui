@@ -15,18 +15,19 @@ import experiment_service_pb2_grpc as pb2_grpc
 from collections import defaultdict
 from torchvision import transforms
 from scope_timer import ScopeTimer
+import traceback
 
 # from fashion_mnist_exp import get_exp
 
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-from imagenet_exp import get_exp
+# from imagenet_exp import get_exp
 # from imagenet_exp_deep import get_exp
 # from imagenet_convnext import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
 # from segmentation_exp import get_exp
-# from cad_models_exp import get_exp
+from cad_models_exp import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
@@ -34,10 +35,8 @@ experiment = get_exp()
 
 def training_thread_callback():
     while True:
-        # print("Training thread callback ", str(experiment), end="\r")
         if experiment.get_is_training():
             experiment.train_step_or_eval_full()
-            # print(f"[TRAIN] Steps left: {experiment.get_training_steps_to_do()}")
 
 
 training_thread = Thread(target=training_thread_callback)
@@ -278,7 +277,7 @@ def load_raw_image(dataset, index):
         raise ValueError("Dataset type not supported for raw image extraction.")
 
 
-def _get_input_tensor_for_sample(dataset, sample_id):
+def _get_input_tensor_for_sample(dataset, sample_id, device):
     if hasattr(dataset, "_getitem_raw"):
         tensor, _, _ = dataset._getitem_raw(sample_id)
     else:
@@ -291,6 +290,8 @@ def _get_input_tensor_for_sample(dataset, sample_id):
         tensor = tensor.unsqueeze(0) 
     elif tensor.ndim == 1:
         tensor = tensor.unsqueeze(0)
+    
+    tensor = tensor.to(device)
     return tensor
 
 
@@ -535,7 +536,6 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         return response
 
     def _apply_zerofy(self, layer, from_ids, to_ids):
-        
         in_max = int(layer.incoming_neuron_count)
         out_max = int(layer.neuron_count)
 
@@ -686,73 +686,59 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         answer.weights.extend(weights)
 
         return answer
-        
+
     def GetActivations(self, request, context):
+        print(f"ExperimentServiceServicer.GetActivations({request})")
+        empty_resp = pb2.ActivationResponse(layer_type="", neurons_count=0)
+
         try:
-            try:
-                ds = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
-            except Exception:
-                ds = experiment.train_loader.dataset
+            ds = experiment.train_loader.dataset
+            if request.origin == "eval":
+                ds = experiment.eval_loader.dataset
 
             sid = int(request.sample_id)
-            if sid < 0 or sid >= len(ds):
-                return pb2.ActivationResponse(layer_type="", neurons_count=0)
+            if request.sample_id < 0 or request.sample_id >= len(ds):
+                raise ValueError(
+                    f"No sample id {request.sample_id} for {request.origin}")
 
-            x = _get_input_tensor_for_sample(ds, sid)
-            x = x.to(experiment.model.device)
-            
-            layer_id = int(request.layer_id)
-            
+            x = _get_input_tensor_for_sample(
+                ds, request.sample_id, experiment.device)
+
             with torch.no_grad():
-                result = experiment.model.forward(x, intermediary_outputs=[layer_id])
-            
-            if isinstance(result, tuple) and len(result) == 2:
-                output, intermediaries = result
-                if layer_id in intermediaries:
-                    y = intermediaries[layer_id]
-                    
-                    if torch.is_tensor(y):
-                        y_np = y.detach().cpu().numpy()
-                    else:
-                        y_np = np.array(y)
-                    
-                    layer = experiment.model.get_layer_by_id(layer_id)
-                    layer_type = layer.__class__.__name__
-                    resp = pb2.ActivationResponse(layer_type=layer_type)
-                    
-                    if "Conv2d" in layer_type:
-                        if y_np.ndim != 4:  # (B, C, H, W)
-                            print(f"Unexpected Conv2d output shape: {y_np.shape}")
-                            return pb2.ActivationResponse(layer_type=layer_type, neurons_count=0)
-                        _, C, H, W = y_np.shape
-                        resp.neurons_count = int(C)
-                        for c in range(C):
-                            vals = y_np[0, c].astype(np.float32).reshape(-1).tolist()
-                            amap = pb2.ActivationMap(neuron_id=c, values=vals, H=H, W=W)
-                            resp.activations.append(amap)
-                    else:
-                        if y_np.ndim == 1:
-                            y_np = y_np.reshape(1, -1)
-                        elif y_np.ndim > 2:
-                            y_np = y_np.reshape(1, -1)
-                        
-                        _, N = y_np.shape
-                        resp.neurons_count = int(N)
-                        for n in range(N):
-                            v = float(y_np[0, n])
-                            amap = pb2.ActivationMap(neuron_id=n, values=[v], H=1, W=1)
-                            resp.activations.append(amap)
-                    
-                    return resp
-            
-            return pb2.ActivationResponse(layer_type="", neurons_count=0)
-                
-        except Exception as e:
-            print(f"Error in GetActivations: {str(e)}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
-            return pb2.ActivationResponse(layer_type="", neurons_count=0)
+                intermediaries = {request.layer_id: None}
+                _ = experiment.model.forward(
+                    x, intermediary_outputs=intermediaries)
 
+            if intermediaries[request.layer_id] is None:
+                raise ValueError(f"No intermediary layer {request.layer_id}")
+
+            layer = experiment.model.get_layer_by_id(request.layer_id)
+            layer_type = layer.__class__.__name__
+            amap = intermediaries[request.layer_id].squeeze(0).detach().cpu().numpy()
+            resp = pb2.ActivationResponse(layer_type=layer_type)
+
+            # At this point we will assume some things, otherwise we keep
+            # rechecking same things over and over again.
+            C, H, W = 1, 1, 1
+            if amap.ndim == 3:  # Conv2d output (C, H, W)
+                C, H, W = amap.shape
+            elif amap.ndim == 1:  # Linear output (C, ), will use C as features
+                C = amap.shape
+
+            resp.neurons_count = C
+            for c in range(C):
+                vals = amap[c].astype(np.float32).reshape(-1).tolist()
+                if not isinstance(vals, list):
+                    vals = [vals, ]
+                resp.activations.append(
+                    pb2.ActivationMap(neuron_id=c, values=vals, H=H, W=W))
+            return resp
+        except (ValueError, Exception) as e:
+            print(
+                f"Error in GetActivations: {str(e)}",
+                f"Traceback: {traceback.format_exc()}")
+
+        return empty_resp
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=6))
