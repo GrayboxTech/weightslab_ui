@@ -2088,7 +2088,7 @@ def get_ui_app_layout(ui_state: UIState) -> html.Div:
         dcc.Store(id='train-image-selected-ids', data=[]),
         dcc.Store(id='eval-image-selected-ids', data=[]),
         dcc.Interval(id='weights-render-freq', interval=1*1000, n_intervals=0),
-        dcc.Interval(id='weights-fetch-freq', interval=500, n_intervals=0),
+        dcc.Interval(id='weights-fetch-freq', interval=1000, n_intervals=0),
         dcc.Interval(id='datatbl-render-freq', interval=10*1000, n_intervals=0),
         dcc.Interval(id='graphss-render-freq', interval=10*1000, n_intervals=0),
     ]
@@ -2790,19 +2790,18 @@ def main():
         Output({'type': 'layer-heatmap', 'layer_id': MATCH}, 'style'),
         Input('weights-fetch-freq', 'n_intervals'),                      
         Input('neuron_stats-checkboxes', 'value'),
+        Input({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'value'), 
         Input({'type': 'layer-neuron-range', 'layer_id': ALL}, 'n_submit'),
         State({'type': 'layer-heatmap', 'layer_id': MATCH}, 'id'),
         State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'id'),
         State({'type': 'linear-incoming-shape', 'layer_id': ALL}, 'value'),
         State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'id'),
-        State({'type': 'layer-heatmap-checkbox', 'layer_id': ALL}, 'value'),
         State({'type': 'layer-neuron-range', 'layer_id': ALL}, 'id'),
         State({'type': 'layer-neuron-range', 'layer_id': ALL}, 'value'),
     )
     def render_layer_heatmap(
-            _, checklist_values, submit_counts,  heatmap_id, all_linear_ids,
-            all_linear_values, all_cb_ids, all_cb_vals, all_range_ids,
-            all_range_vals
+            _, checklist_values, checkbox_values, submit_counts, heatmap_id, 
+            all_linear_ids, all_linear_values, all_cb_ids, all_range_ids, all_range_vals
     ):
         values = checklist_values or []
         global_heatmap_enabled = ('show_filter_heatmaps' in values) or ('show_heatmaps' in values)
@@ -2816,7 +2815,7 @@ def main():
 
         is_layer_checked = False
         try:
-            for cid, cval in zip(all_cb_ids or [], all_cb_vals or []):
+            for cid, cval in zip(all_cb_ids or [], checkbox_values or []):
                 lid = int(cid.get('layer_id')) if isinstance(cid, dict) else None
                 if lid == layer_id:
                     is_layer_checked = bool(cval)
