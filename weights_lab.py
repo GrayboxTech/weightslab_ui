@@ -2088,7 +2088,7 @@ def get_ui_app_layout(ui_state: UIState) -> html.Div:
         dcc.Store(id='train-image-selected-ids', data=[]),
         dcc.Store(id='eval-image-selected-ids', data=[]),
         dcc.Interval(id='weights-render-freq', interval=1*1000, n_intervals=0),
-        dcc.Interval(id='weights-fetch-freq', interval=15000, n_intervals=0),
+        dcc.Interval(id='weights-fetch-freq', interval=500, n_intervals=0),
         dcc.Interval(id='datatbl-render-freq', interval=10*1000, n_intervals=0),
         dcc.Interval(id='graphss-render-freq', interval=10*1000, n_intervals=0),
     ]
@@ -2703,6 +2703,7 @@ def main():
         Input('activation-sample-id', 'value'),   
         Input('activation-origin', 'value'),  
         State({'type': 'layer-activation', 'layer_id': MATCH}, 'id'),
+        prevent_initial_call = True
     )
     def render_layer_activation(checklist_values, sample_value, origin_value, act_id):
         values = checklist_values or []
