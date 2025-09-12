@@ -94,34 +94,34 @@ class ConvNet(NetworkWithOps, nn.Module):
 
         self.flatten_conv_id = self.bnorm7.get_module_id()
 
-    def forward(self, x):
+    def forward(self, x, intermediary_outputs=None):
         self.maybe_update_age(x)
         # Block 1: conv -> BN -> ReLU -> max pool
-        x = F.relu(self.bnorm1(self.conv1(x)))
+        x = F.relu(self.bnorm1(self.conv1(x, intermediary=intermediary_outputs)))
         x = F.max_pool2d(x, 2)  # reduces spatial size from 256 -> 128
 
         # Block 2
-        x = F.relu(self.bnorm2(self.conv2(x)))
+        x = F.relu(self.bnorm2(self.conv2(x, intermediary=intermediary_outputs)))
         x = F.max_pool2d(x, 2)  # 128 -> 64
 
         # Block 3
-        x = F.relu(self.bnorm3(self.conv3(x)))
+        x = F.relu(self.bnorm3(self.conv3(x, intermediary=intermediary_outputs)))
         x = F.max_pool2d(x, 2)  # 64 -> 32
 
         # Block 4
-        x = F.relu(self.bnorm4(self.conv4(x)))
+        x = F.relu(self.bnorm4(self.conv4(x, intermediary=intermediary_outputs)))
         x = F.max_pool2d(x, 2)  # 32 -> 16
 
         # Block 5
-        x = F.relu(self.bnorm5(self.conv5(x)))
+        x = F.relu(self.bnorm5(self.conv5(x, intermediary=intermediary_outputs)))
         x = F.max_pool2d(x, 2)  # 16 -> 8
 
         # Block 6
-        x = F.relu(self.bnorm6(self.conv6(x)))
+        x = F.relu(self.bnorm6(self.conv6(x, intermediary=intermediary_outputs)))
         x = F.max_pool2d(x, 2)  # 8 -> 4
 
         # Block 7
-        x = F.relu(self.bnorm7(self.conv7(x)))
+        x = F.relu(self.bnorm7(self.conv7(x, intermediary=intermediary_outputs)))
         x = F.max_pool2d(x, 2)  # 4 -> 2
 
         # Flatten
@@ -143,7 +143,7 @@ val_transform = T.Compose([
     T.Normalize(IM_MEAN, IM_STD),
 ])
 
-root_dir = 'ycb_datasets'
+root_dir = '/home/rotaru/Desktop/GRAYBOX/repos/datasets/robotics/ycb_datasets/'
 
 train_dataset = ds.ImageFolder(os.path.join(root_dir, "train"), transform=train_transform)
 val_dataset   = ds.ImageFolder(os.path.join(root_dir, "val"),   transform=val_transform)
@@ -159,7 +159,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 metrics = {
     "acc": MulticlassAccuracy(num_classes=78, average="micro").to(device),
-    "f1": MulticlassF1Score(num_classes=78, average="macro").to(device),
+    # "f1": MulticlassF1Score(num_classes=78, average="macro").to(device),
 }
 
 def get_exp():
@@ -170,13 +170,13 @@ def get_exp():
         model=model, optimizer_class=optim.Adam,
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
-        device=device, learning_rate=1e-4, batch_size=256,
+        device=device, learning_rate=1e-3, batch_size=256,
         training_steps_to_do=200000,
         name="v0",
         metrics=metrics,
         root_log_dir='cad_models',
         logger=Dash("cad_models"),
-        criterion = nn.CrossEntropyLoss(reduction='none'),
+        criterion=nn.CrossEntropyLoss(reduction='none'),
         skip_loading=False)
 
     def stateful_difference_monitor_callback():
