@@ -41,6 +41,7 @@ from dash.dash_table.Format import Format, Scheme
 from scope_timer import ScopeTimer
 from dataclasses import dataclass
 from math import isqrt
+import random
 
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -1774,7 +1775,7 @@ def get_data_tab(ui_state: UIState):
             ]),
             dcc.Tab(label='Eval Dataset', value='eval', children=[
                 html.Div([
-                    html.H2("Eval Dataset"),
+                    html.H2("Eval Dataset", id="eval-dataset-header"),
                     eval_controls,
                     html.Div([
                         html.Div([eval_table], style={
@@ -2938,10 +2939,11 @@ def main():
         Output('train-dataset-header', 'children'),
         Input('datatbl-render-freq', 'n_intervals'),
         Input('run-train-data-query', 'n_clicks'),
+        Input('train-image-selected-ids', 'data'),
         State('table-refresh-checkbox', 'value'),
         State('train-data-query-input', 'value'),
     )
-    def update_train_data_table(_, __, chk, query):
+    def update_train_data_table(_, __, train_selected_ids, chk, query):
         if 'refresh_regularly' not in chk:
             return no_update
 
@@ -2963,18 +2965,21 @@ def main():
                 print(f"[ERROR] Failed to sort train data: {e}")
 
         num_available_samples = (~df["Discarded"]).sum()
-        return df.to_dict('records'), f"Train Dataset #{num_available_samples} samples"
+        selected_count = len(train_selected_ids or [])
+        return df.to_dict('records'), f"Train Dataset #{num_available_samples} samples | {selected_count} selected"
 
 
 
     @app.callback(
         Output('eval-data-table', 'data'),
+        Output('eval-dataset-header', 'children'),
         Input('datatbl-render-freq', 'n_intervals'),
         Input('run-eval-data-query', 'n_clicks'),
+        Input('eval-image-selected-ids', 'data'),
         State('eval-table-refresh-checkbox', 'value'),
         State('eval-data-query-input', 'value'),
     )
-    def update_eval_data_table(_, __, chk, query):
+    def update_eval_data_table(_, __, eval_selected_ids, chk, query):
         if 'refresh_regularly' not in chk:
             return no_update
 
@@ -2994,7 +2999,9 @@ def main():
                 df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
             except Exception as e:
                 print(f"[ERROR] Failed to sort eval data: {e}")
-        return df.to_dict('records')
+        num_available_samples = (~df["Discarded"]).sum()
+        selected_count = len(eval_selected_ids or [])
+        return df.to_dict('records'), f"Eval Dataset #{num_available_samples} samples | {selected_count} selected"
 
     @app.callback(
         Input('run-train-data-query', 'n_clicks'),
@@ -3007,13 +3014,16 @@ def main():
         State('eval-query-discard-toggle', 'value'),
         State('train-denylist-accumulate-checkbox', 'value'),
         State('eval-denylist-accumulate-checkbox', 'value'),
+        State('train-image-selected-ids', 'data'),
+        State('eval-image-selected-ids', 'data'),
         prevent_initial_call=True
     )
     def run_query_on_dataset(train_click, eval_click,
                             train_query, eval_query,
                             train_weight, eval_weight,
                             train_toggle, eval_toggle,
-                            train_accumulate, eval_accumulate):
+                            train_accumulate, eval_accumulate,
+                            train_selected_ids, eval_selected_ids):
         ctx_triggered = dash.callback_context.triggered
         if not ctx_triggered:
             return no_update
@@ -3025,25 +3035,44 @@ def main():
             query = train_query
             weight = train_weight
             toggle_values = train_toggle
+            accumulate_values = train_accumulate
         else:
             tab_type = "eval"
             query = eval_query
             weight = eval_weight
             toggle_values = eval_toggle
+            accumulate_values = eval_accumulate
 
-        if not query or 'sortby' in query.lower():
-            return no_update
+        selected_ids_store = train_selected_ids if tab_type == "train" else eval_selected_ids
         if weight is None:
             weight = 1.0
-        un_discard = 'undiscard' in toggle_values
+        un_discard = 'undiscard' in (toggle_values or [])
+        accumulate = 'accumulate' in (accumulate_values or [])
 
-        try:
+        if isinstance(query, str) and query.strip().lower() == 'selected':
+            sample_ids = list(map(int, selected_ids_store or []))
+            if not sample_ids:
+                print(f"[{tab_type.capitalize()} Query] 'selected' used but no samples are selected.")
+                return no_update
+
+            if isinstance(weight, float) and 0 < weight < 1 and len(sample_ids) > 1:
+                k = max(1, int(round(len(sample_ids) * weight)))
+                sample_ids = random.sample(sample_ids, k)
+            elif isinstance(weight, int) and weight >= 1 and len(sample_ids) > weight:
+                sample_ids = random.sample(sample_ids, weight)
+
+        else:
+            if not query or ('sortby' in query.lower()):
+                return no_update
+
             df, remove_op_key, deny_op_key = get_query_context(tab_type, ui_state)
             task_type = getattr(ui_state, "task_type", "classification")
             if task_type == "classification":
                 for col in ["Prediction", "Target"]:
                     if col in df.columns:
-                        df[col] = df[col].apply(lambda v: v[0] if isinstance(v, (list, np.ndarray)) and len(v) == 1 else v)
+                        df[col] = df[col].apply(
+                            lambda v: v[0] if isinstance(v, (list, np.ndarray)) and len(v) == 1 else v
+                        )
             elif task_type == "segmentation":
                 for col in ["Prediction", "Target"]:
                     if col in df.columns:
@@ -3060,84 +3089,32 @@ def main():
                 query_dataframe = query_dataframe.sample(n=weight)
 
             sample_ids = query_dataframe['SampleId'].to_list()
-            deny_op = pb2.DenySamplesOperation()
-            deny_op.sample_ids.extend(sample_ids)
-            request = pb2.TrainerCommand()
-            accumulate = 'accumulate' in (train_accumulate if tab_type == "train" else eval_accumulate)
-            if un_discard:
-                if tab_type == "train":
-                    request.remove_from_denylist_operation.CopyFrom(deny_op)
-                else:
-                    request.remove_eval_from_denylist_operation.CopyFrom(deny_op)
+
+        deny_op = pb2.DenySamplesOperation()
+        deny_op.sample_ids.extend(sample_ids)
+        request = pb2.TrainerCommand()
+
+        if un_discard:
+            if tab_type == "train":
+                request.remove_from_denylist_operation.CopyFrom(deny_op)
             else:
-                if tab_type == "train":
-                    request.deny_samples_operation.CopyFrom(deny_op)
-                    request.deny_samples_operation.accumulate = accumulate
-                else:
-                    request.deny_eval_samples_operation.CopyFrom(deny_op)
-                    request.deny_eval_samples_operation.accumulate = accumulate
-
-            response = stub.ExperimentCommand(request)
-            print(
-                f"[{tab_type.capitalize()} Query] {query}, Weight: {weight}, Un-discard: {un_discard}, "
-                f"Sample count: {len(sample_ids)}, Response: {response.message}"
-            )
-
-        except Exception as e:
-            print(f"[ERROR] {tab_type.capitalize()} query failed: {e}")
-
-        return no_update
-
-
-    @app.callback(
-        Input('run-eval-data-query', 'n_clicks'),
-        State('eval-data-query-input', 'value'),
-        State('eval-data-query-weight', 'value'),
-        State('eval-query-discard-toggle', 'value'),
-        prevent_initial_call=True
-    )
-    def run_eval_query_on_dataset(_, query, weight, toggle_values):
-        if 'sortby' in query.lower():
-            return no_update
-        
-        if weight is None:
-            weight = 1.0
-
-        un_discard = 'undiscard' in toggle_values
-        try:
-            query_dataframe = ui_state.eval_samples_df.query(query)
-
-            if weight <= 1.0:
-                query_dataframe = query_dataframe.sample(frac=weight)
-            elif isinstance(weight, int):
-                query_dataframe = query_dataframe.sample(n=weight)
-
-            sample_ids = query_dataframe['SampleId'].to_list()
-
-            if un_discard:
-                allow_op = pb2.DenySamplesOperation()
-                allow_op.sample_ids.extend(sample_ids)
-                request = pb2.TrainerCommand(
-                    remove_eval_from_denylist_operation=allow_op
-                )
+                request.remove_eval_from_denylist_operation.CopyFrom(deny_op)
+        else:
+            if tab_type == "train":
+                request.deny_samples_operation.CopyFrom(deny_op)
+                request.deny_samples_operation.accumulate = accumulate
             else:
-                deny_op = pb2.DenySamplesOperation()
-                deny_op.sample_ids.extend(sample_ids)
-                request = pb2.TrainerCommand(
-                    deny_eval_samples_operation=deny_op
-                )
+                request.deny_eval_samples_operation.CopyFrom(deny_op)
+                request.deny_eval_samples_operation.accumulate = accumulate
 
-            response = stub.ExperimentCommand(request)
-            print(
-                f"[Eval Query] {query}, Weight: {weight}, Un-discard: {un_discard}, "
-                f"Sample count: {len(sample_ids)}, Response: {response.message}"
-            )
-
-        except Exception as e:
-            print(f"[ERROR] Eval query failed: {e}")
-
+        response = stub.ExperimentCommand(request)
+        print(
+            f"[{tab_type.capitalize()} Query] "
+            f"{('selected' if isinstance(query, str) and query.strip().lower() == 'selected' else query)}, "
+            f"Weight: {weight}, Un-discard: {un_discard}, "
+            f"Sample count: {len(sample_ids)}, Response: {response.message}"
+        )
         return no_update
-
 
     @app.callback(
         Output('train-data-div', 'style', allow_duplicate=True),
