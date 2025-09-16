@@ -35,35 +35,35 @@ class ConvNet(NetworkWithOps, nn.Module):
         super(ConvNet, self).__init__()
         self.tracking_mode = TrackingMode.DISABLED
         # Convolution block 1
-        self.conv1 = Conv2dWithNeuronOps(in_channels=3, out_channels=4, kernel_size=3, padding=1)
-        self.bnorm1 = BatchNorm2dWithNeuronOps(4)
+        self.conv1 = Conv2dWithNeuronOps(in_channels=3, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm1 = BatchNorm2dWithNeuronOps(12)
 
         # Convolution block 2
-        self.conv2 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
-        self.bnorm2 = BatchNorm2dWithNeuronOps(4)
+        self.conv2 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm2 = BatchNorm2dWithNeuronOps(12)
 
         # Convolution block 3
-        self.conv3 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
-        self.bnorm3 = BatchNorm2dWithNeuronOps(4)
+        self.conv3 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm3 = BatchNorm2dWithNeuronOps(12)
 
         # Convolution block 4
-        self.conv4 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
-        self.bnorm4 = BatchNorm2dWithNeuronOps(4)
+        self.conv4 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm4 = BatchNorm2dWithNeuronOps(12)
 
         # Convolution block 5
-        self.conv5 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
-        self.bnorm5 = BatchNorm2dWithNeuronOps(4)
+        self.conv5 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm5 = BatchNorm2dWithNeuronOps(12)
 
         # Convolution block 6
-        self.conv6 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
-        self.bnorm6 = BatchNorm2dWithNeuronOps(4)
+        self.conv6 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm6 = BatchNorm2dWithNeuronOps(12)
 
         # Convolution block 7
-        self.conv7 = Conv2dWithNeuronOps(in_channels=4, out_channels=4, kernel_size=3, padding=1)
-        self.bnorm7 = BatchNorm2dWithNeuronOps(4)
+        self.conv7 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm7 = BatchNorm2dWithNeuronOps(12)
 
         # Fully connected output
-        self.fc = LinearWithNeuronOps(16, 78)
+        self.fc = LinearWithNeuronOps(48, 78)
 
     def children(self):
         return [
