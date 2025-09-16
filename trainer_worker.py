@@ -588,16 +588,15 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 executor.submit(process_sample, sid, dataset, do_resize, resize_dims): sid
                 for sid in request.sample_ids
             }
-            results = []
+            results = {}
             for future in concurrent.futures.as_completed(futures):
                 sid, transformed_bytes, raw_bytes = future.result()
-                if transformed_bytes is not None and raw_bytes is not None:
-                    results.append((sid, transformed_bytes, raw_bytes))
+                results[sid] = (transformed_bytes, raw_bytes)
 
-        # Sort the results by sample ID
-        results.sort(key=lambda x: x[0])
-
-        for sid, transformed_bytes, raw_bytes in results:
+        for sid in request.sample_ids:
+            transformed_bytes, raw_bytes = results.get(sid, (None, None))
+            if transformed_bytes is None or raw_bytes is None:
+                continue
             sample_response = pb2.SampleRequestResponse(
                 sample_id=sid,
                 label=-1,  # not used for segmentation
