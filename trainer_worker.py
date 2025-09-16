@@ -42,6 +42,7 @@ def training_thread_callback():
 training_thread = Thread(target=training_thread_callback)
 training_thread.start()
 
+samples_packaging_timer = ScopeTimer("samples_packaging")
 
 HYPER_PARAMETERS = {
     ("Experiment Name", "experiment_name", "text", lambda: experiment.name),
@@ -77,7 +78,6 @@ def get_hyper_parameters_pb(
 
     return hyper_parameters_pb2
 
-
 def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
 
     layer_id = layer.get_module_id()
@@ -107,7 +107,6 @@ def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
 
     return neuron_representations
 
-
 def get_layer_representation(layer) -> pb2.LayerRepresentation:
     layer_representation = None
     if "Conv2d" in layer.__class__.__name__:
@@ -135,7 +134,6 @@ def get_layer_representation(layer) -> pb2.LayerRepresentation:
         get_neuron_representations(layer))
     return layer_representation
 
-
 def get_layer_representations(model):
     layer_representations = []
     for layer in model.layers:
@@ -159,7 +157,6 @@ def make_task_field(name, value):
     else:
         raise ValueError(f"Unsupported value type for TaskField: {name}: {type(value)}")
 
-
 def mask_to_png_bytes(mask, num_classes=21):
     if isinstance(mask, torch.Tensor):
         mask = mask.detach().cpu().numpy()
@@ -181,7 +178,6 @@ def mask_to_png_bytes(mask, num_classes=21):
     buf = io.BytesIO()
     im.save(buf, format="PNG")
     return buf.getvalue()
-
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     # print("[BACKEND].get_data_set_representation")
@@ -229,7 +225,6 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
 
     return sample_stats
 
-
 def tensor_to_bytes(tensor):
     # Convert tensor to numpy array and transpose to (H, W, C) format
     if tensor.shape[0] > 1:
@@ -276,7 +271,6 @@ def load_raw_image(dataset, index):
     else:
         raise ValueError("Dataset type not supported for raw image extraction.")
 
-
 def _get_input_tensor_for_sample(dataset, sample_id, device):
     if hasattr(dataset, "_getitem_raw"):
         tensor, _, _ = dataset._getitem_raw(sample_id)
@@ -294,6 +288,47 @@ def _get_input_tensor_for_sample(dataset, sample_id, device):
     tensor = tensor.to(device)
     return tensor
 
+
+def process_sample(sid, dataset, do_resize, resize_dims):
+    try:
+        if hasattr(dataset, "_getitem_raw"):
+            tensor, idx, label = dataset._getitem_raw(sid)
+        else:
+            tensor, idx, label = dataset[sid]
+
+        if isinstance(tensor, torch.Tensor):
+            img = tensor.detach().cpu()
+        else:
+            img = torch.tensor(tensor)
+
+        if img.ndim == 3:
+            pil_img = transforms.ToPILImage()(img)
+        elif img.ndim == 2:
+            pil_img = Image.fromarray((img.numpy() * 255).astype(np.uint8))
+        else:
+            raise ValueError("Unknown image shape.")
+
+        if do_resize:
+            pil_img = pil_img.resize(resize_dims, Image.BILINEAR)
+
+        buf = io.BytesIO()
+        pil_img.save(buf, format='PNG')
+        transformed_bytes = buf.getvalue()
+
+        try:
+            raw = load_raw_image(dataset, sid)
+            if do_resize:
+                raw = raw.resize(resize_dims, Image.BILINEAR)
+            raw_buf = io.BytesIO()
+            raw.save(raw_buf, format='PNG')
+            raw_bytes = raw_buf.getvalue()
+        except Exception:
+            raw_bytes = transformed_bytes 
+
+        return sid, transformed_bytes, raw_bytes
+    except Exception as e:
+        print(f"[Error] GetSamples({sid}) failed: {e}")
+        return sid, None, None
 
 class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
     def StreamStatus(self, request_iterator, context):
@@ -470,69 +505,107 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         )
 
         return response
-    
+
+    # def GetSamples(self, request, context):
+    #     dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
+    #     response = pb2.BatchSampleResponse()
+
+    #     do_resize = request.HasField("resize_width") and request.HasField("resize_height")
+    #     resize_dims = (request.resize_width, request.resize_height) if do_resize else None
+    #     task_type = getattr(dataset, "task_type", getattr(experiment, "task_type", "classification"))
+
+    #     samples_packaging_timer = ScopeTimer("samples_packaging")
+    #     for sid in request.sample_ids:
+    #         samples_packaging_timer.start()
+    #         try:
+    #             if hasattr(dataset, "_getitem_raw"):
+    #                 tensor, idx, label = dataset._getitem_raw(sid)
+    #             else:
+    #                 tensor, idx, label = dataset[sid]
+
+    #             if isinstance(tensor, torch.Tensor):
+    #                 img = tensor.detach().cpu()
+    #             else:
+    #                 img = torch.tensor(tensor)
+    #             if img.ndim == 3:
+    #                 pil_img = transforms.ToPILImage()(img)
+    #             elif img.ndim == 2:
+    #                 pil_img = Image.fromarray((img.numpy() * 255).astype(np.uint8))
+    #             else:
+    #                 raise ValueError("Unknown image shape.")
+
+    #             if resize_dims:
+    #                 pil_img = pil_img.resize(resize_dims, Image.BILINEAR)
+    #             buf = io.BytesIO()
+    #             pil_img.save(buf, format='PNG')
+    #             transformed_bytes = buf.getvalue()
+
+    #             try:
+    #                 raw = load_raw_image(dataset, sid)
+    #                 if resize_dims:
+    #                     raw = raw.resize(resize_dims, Image.BILINEAR)
+    #                 raw_buf = io.BytesIO()
+    #                 raw.save(raw_buf, format='PNG')
+    #                 raw_bytes = raw_buf.getvalue()
+    #             except Exception:
+    #                 raw_bytes = transformed_bytes 
+
+    #             mask_bytes = b""
+    #             pred_bytes = b""
+
+    #             if task_type == "segmentation":
+    #                 mask_bytes = mask_to_png_bytes(label)
+    #                 pred_mask = dataset.get_prediction_mask(sid)
+    #                 pred_bytes = mask_to_png_bytes(pred_mask)
+
+
+    #             sample_response = pb2.SampleRequestResponse(
+    #                 sample_id=sid,
+    #                 label=int(label) if task_type == "classification" else -1,  # not used for segmentation
+    #                 data=transformed_bytes,
+    #                 raw_data=raw_bytes,
+    #                 mask=mask_bytes,
+    #                 prediction=pred_bytes,
+    #             )
+    #             response.samples.append(sample_response)
+    #         except Exception as e:
+    #             print(f"[Error] GetSamples({sid}) failed: {e}")
+    #         samples_packaging_timer.stop()
+    #     print(samples_packaging_timer)
+    #     return response
+
     def GetSamples(self, request, context):
+        import concurrent.futures
+
         dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
         response = pb2.BatchSampleResponse()
 
         do_resize = request.HasField("resize_width") and request.HasField("resize_height")
         resize_dims = (request.resize_width, request.resize_height) if do_resize else None
-        task_type = getattr(dataset, "task_type", getattr(experiment, "task_type", "classification"))
 
-        for sid in request.sample_ids:
-            try:
-                if hasattr(dataset, "_getitem_raw"):
-                    tensor, idx, label = dataset._getitem_raw(sid)
-                else:
-                    tensor, idx, label = dataset[sid]
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {
+                executor.submit(process_sample, sid, dataset, do_resize, resize_dims): sid
+                for sid in request.sample_ids
+            }
+            results = []
+            for future in concurrent.futures.as_completed(futures):
+                sid, transformed_bytes, raw_bytes = future.result()
+                if transformed_bytes is not None and raw_bytes is not None:
+                    results.append((sid, transformed_bytes, raw_bytes))
 
-                if isinstance(tensor, torch.Tensor):
-                    img = tensor.detach().cpu()
-                else:
-                    img = torch.tensor(tensor)
-                if img.ndim == 3:
-                    pil_img = transforms.ToPILImage()(img)
-                elif img.ndim == 2:
-                    pil_img = Image.fromarray((img.numpy() * 255).astype(np.uint8))
-                else:
-                    raise ValueError("Unknown image shape.")
+        # Sort the results by sample ID
+        results.sort(key=lambda x: x[0])
 
-                if resize_dims:
-                    pil_img = pil_img.resize(resize_dims, Image.BILINEAR)
-                buf = io.BytesIO()
-                pil_img.save(buf, format='PNG')
-                transformed_bytes = buf.getvalue()
+        for sid, transformed_bytes, raw_bytes in results:
+            sample_response = pb2.SampleRequestResponse(
+                sample_id=sid,
+                label=-1,  # not used for segmentation
+                data=transformed_bytes,
+                raw_data=raw_bytes,
+            )
+            response.samples.append(sample_response)
 
-                try:
-                    raw = load_raw_image(dataset, sid)
-                    if resize_dims:
-                        raw = raw.resize(resize_dims, Image.BILINEAR)
-                    raw_buf = io.BytesIO()
-                    raw.save(raw_buf, format='PNG')
-                    raw_bytes = raw_buf.getvalue()
-                except Exception:
-                    raw_bytes = transformed_bytes 
-
-                mask_bytes = b""
-                pred_bytes = b""
-
-                if task_type == "segmentation":
-                    mask_bytes = mask_to_png_bytes(label)
-                    pred_mask = dataset.get_prediction_mask(sid)
-                    pred_bytes = mask_to_png_bytes(pred_mask)
-
-
-                sample_response = pb2.SampleRequestResponse(
-                    sample_id=sid,
-                    label=int(label) if task_type == "classification" else -1,  # not used for segmentation
-                    data=transformed_bytes,
-                    raw_data=raw_bytes,
-                    mask=mask_bytes,
-                    prediction=pred_bytes,
-                )
-                response.samples.append(sample_response)
-            except Exception as e:
-                print(f"[Error] GetSamples({sid}) failed: {e}")
         return response
 
     def _apply_zerofy(self, layer, from_ids, to_ids):
@@ -602,7 +675,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             answer = pb2.WeightsOperationResponse(
                 success=True,
                 message=f"Reinitialized {weight_operations.neuron_ids}")
-            
+
         elif weight_operations.op_type == pb2.WeightOperationType.ZEROFY:
             layer_id = weight_operations.layer_id
             layer = experiment.model.get_layer_by_id(layer_id)
