@@ -2733,7 +2733,7 @@ def main():
                 vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
                 max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
 
-                print(f"conv2d[{i}: ", vals, vals.shape, max_abs)
+                # print(f"conv2d[{i}: ", vals, vals.shape, max_abs)
                 fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
                 graphs.append(
                     html.Div(
@@ -3282,15 +3282,32 @@ def main():
         return current_data
     
     @app.callback(
-        Output('train-image-selected-ids', 'data'),
-        Input('train-data-table', 'derived_viewport_selected_rows'),
-        State('train-data-table', 'derived_viewport_data'),
+        Output('train-image-selected-ids', 'data', allow_duplicate=True),
+        Input('train-data-table', 'derived_virtual_selected_rows'), 
+        State('train-data-table', 'derived_virtual_data'),          
+        State('train-image-selected-ids', 'data'),
         prevent_initial_call=True
     )
-    def store_selected_sample_ids(view_sel_rows, viewport_data):
-        if not view_sel_rows or not viewport_data:
-            return []
-        return [viewport_data[i]['SampleId'] for i in view_sel_rows if 0 <= i < len(viewport_data)]
+    def sync_selection_from_table(sel_rows, vdata, prev_ids):
+        if sel_rows is None or vdata is None:
+            return no_update
+        ids = [vdata[i]['SampleId'] for i in sel_rows if 0 <= i < len(vdata)]
+        return ids
+    
+    @app.callback(
+        Output('eval-image-selected-ids', 'data', allow_duplicate=True),
+        Input('eval-data-table', 'derived_virtual_selected_rows'),
+        State('eval-data-table', 'derived_virtual_data'),
+        State('eval-image-selected-ids', 'data'),
+        prevent_initial_call=True
+    )
+    def sync_eval_selection_from_table(sel_rows, vdata, prev_ids):
+        if sel_rows is None or vdata is None:
+            return no_update
+        ids = [vdata[i]['SampleId'] for i in sel_rows if 0 <= i < len(vdata)]
+        return ids
+
+
 
     @app.callback(
         Output({'type': 'sample-img-el', 'origin': 'train', 'sid': ALL}, 'style'),
