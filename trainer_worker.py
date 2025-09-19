@@ -21,13 +21,13 @@ import traceback
 
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-# from imagenet_exp import get_exp
+from imagenet_exp import get_exp
 # from imagenet_exp_deep import get_exp
 # from imagenet_convnext import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
 # from segmentation_exp import get_exp
-from cad_models_exp import get_exp
+# from cad_models_exp import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
@@ -325,10 +325,38 @@ def process_sample(sid, dataset, do_resize, resize_dims):
         except Exception:
             raw_bytes = transformed_bytes 
 
-        return sid, transformed_bytes, raw_bytes
+        task_type = getattr(dataset, "task_type", getattr(experiment, "task_type", "classification"))
+        cls_label = -1
+        mask_bytes = b""
+        pred_bytes = b""
+
+        if task_type == "classification":
+            if isinstance(label, (list, np.ndarray)):
+                cls_label = int(np.array(label).item())
+            elif hasattr(label, 'cpu'):
+                cls_label = int(np.array(label.cpu()).item())
+            else:
+                cls_label = int(label)
+        elif task_type == "segmentation":
+            num_classes = getattr(dataset, "num_classes", 21)
+            try:
+                mask_bytes = mask_to_png_bytes(label, num_classes=num_classes)
+            except Exception:
+                mask_bytes = mask_to_png_bytes(label)
+
+            try:
+                if hasattr(dataset, "get_prediction_mask"):
+                    pred_mask = dataset.get_prediction_mask(sid)
+                    if pred_mask is not None:
+                        pred_bytes = mask_to_png_bytes(pred_mask, num_classes=num_classes)
+            except Exception:
+                pred_bytes = b""
+
+        return sid, transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes
+
     except Exception as e:
         print(f"[Error] GetSamples({sid}) failed: {e}")
-        return sid, None, None
+        return sid, None, None, -1, b"", b""
 
 class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
     def StreamStatus(self, request_iterator, context):
@@ -582,27 +610,42 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
         do_resize = request.HasField("resize_width") and request.HasField("resize_height")
         resize_dims = (request.resize_width, request.resize_height) if do_resize else None
+        task_type = getattr(dataset, "task_type", getattr(experiment, "task_type", "classification"))
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = {
+            fut_map = {
                 executor.submit(process_sample, sid, dataset, do_resize, resize_dims): sid
                 for sid in request.sample_ids
             }
             results = {}
-            for future in concurrent.futures.as_completed(futures):
-                sid, transformed_bytes, raw_bytes = future.result()
-                results[sid] = (transformed_bytes, raw_bytes)
+            for future in concurrent.futures.as_completed(fut_map):
+                sid, transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes = future.result()
+                results[sid] = (transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes)
 
+        # build response preserving input order
         for sid in request.sample_ids:
-            transformed_bytes, raw_bytes = results.get(sid, (None, None))
+            transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes = results.get(
+                sid, (None, None, -1, b"", b"")
+            )
             if transformed_bytes is None or raw_bytes is None:
                 continue
-            sample_response = pb2.SampleRequestResponse(
-                sample_id=sid,
-                label=-1,  # not used for segmentation
-                data=transformed_bytes,
-                raw_data=raw_bytes,
-            )
+
+            if task_type == "classification":
+                sample_response = pb2.SampleRequestResponse(
+                    sample_id=sid,
+                    label=cls_label,
+                    data=transformed_bytes,
+                    raw_data=raw_bytes,
+                )
+            else:  # segmentation
+                sample_response = pb2.SampleRequestResponse(
+                    sample_id=sid,
+                    label=-1, 
+                    data=transformed_bytes,  
+                    raw_data=raw_bytes,      
+                    mask=mask_bytes,        
+                    prediction=pred_bytes,   
+                )
             response.samples.append(sample_response)
 
         return response
@@ -777,9 +820,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 ds, request.sample_id, experiment.device)
 
             with torch.no_grad():
-                intermediaries = {request.layer_id: None}
-                _ = experiment.model.forward(
-                    x, intermediary_outputs=intermediaries)
+                req = {request.layer_id: None}
+                _, intermediaries = experiment.model.forward(x, intermediary_outputs=req)
 
             if intermediaries[request.layer_id] is None:
                 raise ValueError(f"No intermediary layer {request.layer_id}")
