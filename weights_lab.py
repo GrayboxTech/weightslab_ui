@@ -2088,8 +2088,6 @@ def get_ui_app_layout(ui_state: UIState) -> html.Div:
     layout_children = [
         dcc.Store(id='train-image-selected-ids', data=[]),
         dcc.Store(id='eval-image-selected-ids', data=[]),
-        dcc.Store(id='train-discarded-ids', data=list(ui_state.samples_df.loc[ui_state.samples_df['Discarded'], 'SampleId'].astype(int))),
-        dcc.Store(id='eval-discarded-ids', data=list(ui_state.eval_samples_df.loc[ui_state.eval_samples_df['Discarded'], 'SampleId'].astype(int))),
         dcc.Interval(id='weights-render-freq', interval=1*1000, n_intervals=0),
         dcc.Interval(id='weights-fetch-freq', interval=1000, n_intervals=0),
         dcc.Interval(id='datatbl-render-freq', interval=10*1000, n_intervals=0),
@@ -3006,8 +3004,8 @@ def main():
         return df.to_dict('records'), f"Eval Dataset #{num_available_samples} samples | {selected_count} selected"
 
     @app.callback(
-        Output('train-discarded-ids', 'data', allow_duplicate=True),
-        Output('eval-discarded-ids', 'data', allow_duplicate=True),
+        Output('train-sample-panel', 'children', allow_duplicate=True),
+        Output('eval-sample-panel', 'children', allow_duplicate=True),
         Input('run-train-data-query', 'n_clicks'),
         Input('run-eval-data-query', 'n_clicks'),
         State('train-data-query-input', 'value'),
@@ -3020,48 +3018,52 @@ def main():
         State('eval-denylist-accumulate-checkbox', 'value'),
         State('train-image-selected-ids', 'data'),
         State('eval-image-selected-ids', 'data'),
-        State('train-discarded-ids', 'data'),
-        State('eval-discarded-ids', 'data'),
+        State('train-data-table', 'derived_viewport_data'),
+        State('eval-data-table', 'derived_viewport_data'),
+        State('sample-inspect-checkboxes', 'value'),
+        State('eval-sample-inspect-checkboxes', 'value'),
+        State('data-tabs', 'value'),
+
         prevent_initial_call=True
     )
-    def run_query_on_dataset(train_click, eval_click,
-                            train_query, eval_query,
-                            train_weight, eval_weight,
-                            train_toggle, eval_toggle,
-                            train_accumulate, eval_accumulate,
-                            train_selected_ids, eval_selected_ids,
-                            train_discarded_store, eval_discarded_store):
-        ctx_triggered = dash.callback_context.triggered
-        if not ctx_triggered:
-            return no_update
+    def run_query_on_dataset(
+        train_click, eval_click,
+        train_query, eval_query,
+        train_weight, eval_weight,
+        train_toggle, eval_toggle,
+        train_accumulate, eval_accumulate,
+        train_selected_ids, eval_selected_ids,
+        train_viewport, eval_viewport,
+        train_flags, eval_flags, active_tab
+    ):
+        nonlocal ui_state, stub
 
-        triggered_id = ctx_triggered[0]['prop_id'].split('.')[0]
+        if not ctx.triggered:
+            return no_update, no_update
+        trig = ctx.triggered_id
 
-        if 'run-train-data-query' in triggered_id:
-            tab_type = "train"
-            query = train_query
-            weight = train_weight
-            toggle_values = train_toggle
-            accumulate_values = train_accumulate
+        if trig == 'run-train-data-query':
+            tab_type = 'train'
+            query, weight = train_query, (train_weight or 1.0)
+            toggle_values, accumulate_values = train_toggle, train_accumulate
+            selected_ids_store = train_selected_ids or []
+            viewport_rows = train_viewport or []
+            inspect_on = 'inspect_sample_on_click' in (train_flags or [])
         else:
-            tab_type = "eval"
-            query = eval_query
-            weight = eval_weight
-            toggle_values = eval_toggle
-            accumulate_values = eval_accumulate
+            tab_type = 'eval'
+            query, weight = eval_query, (eval_weight or 1.0)
+            toggle_values, accumulate_values = eval_toggle, eval_accumulate
+            selected_ids_store = eval_selected_ids or []
+            viewport_rows = eval_viewport or []
+            inspect_on = 'inspect_sample_on_click' in (eval_flags or [])
 
-        selected_ids_store = train_selected_ids if tab_type == "train" else eval_selected_ids
-        if weight is None:
-            weight = 1.0
         un_discard = 'undiscard' in (toggle_values or [])
         accumulate = 'accumulate' in (accumulate_values or [])
 
         if isinstance(query, str) and query.strip().lower() == 'selected':
             sample_ids = list(map(int, selected_ids_store or []))
             if not sample_ids:
-                print(f"[{tab_type.capitalize()} Query] 'selected' used but no samples are selected.")
-                return no_update
-
+                return no_update, no_update
             if isinstance(weight, float) and 0 < weight < 1 and len(sample_ids) > 1:
                 k = max(1, int(round(len(sample_ids) * weight)))
                 sample_ids = random.sample(sample_ids, k)
@@ -3070,7 +3072,7 @@ def main():
 
         else:
             if not query or ('sortby' in query.lower()):
-                return no_update
+                return no_update, no_update
 
             df, remove_op_key, deny_op_key = get_query_context(tab_type, ui_state)
             task_type = getattr(ui_state, "task_type", "classification")
@@ -3113,28 +3115,44 @@ def main():
             else:
                 request.deny_eval_samples_operation.CopyFrom(deny_op)
                 request.deny_eval_samples_operation.accumulate = accumulate
+        resp = stub.ExperimentCommand(request)
+        print(f"[{tab_type}] deny resp: {resp.message}")
 
-        response = stub.ExperimentCommand(request)
-        print(
-            f"[{tab_type.capitalize()} Query] "
-            f"{('selected' if isinstance(query, str) and query.strip().lower() == 'selected' else query)}, "
-            f"Weight: {weight}, Un-discard: {un_discard}, "
-            f"Sample count: {len(sample_ids)}, Response: {response.message}"
-        )
-        if tab_type == "train":
-            cur = set(int(x) for x in (train_discarded_store or []))
-            if un_discard:
-                cur -= set(sample_ids)
+        with ui_state.lock:
+            if tab_type == "train":
+                mask = ui_state.samples_df['SampleId'].isin(sample_ids)
+                ui_state.samples_df.loc[mask, 'Discarded'] = (not un_discard)
+                df_now = ui_state.samples_df
             else:
-                cur |= set(sample_ids)
-            return sorted(cur), dash.no_update
+                mask = ui_state.eval_samples_df['SampleId'].isin(sample_ids)
+                ui_state.eval_samples_df.loc[mask, 'Discarded'] = (not un_discard)
+                df_now = ui_state.eval_samples_df
+
+        if not inspect_on:
+            return (no_update, no_update)
+
+        visible_ids = [int(r['SampleId']) for r in (viewport_rows or [])]
+        if not visible_ids:
+            return (no_update, no_update)
+
+        discarded_ids = set(df_now.loc[df_now['Discarded'], 'SampleId'].astype(int).tolist())
+
+        selected_ids = train_selected_ids if tab_type == 'train' else eval_selected_ids
+        selected_ids = selected_ids or []
+
+        if tab_type == 'train' and active_tab == 'train':
+            panel_train = render_images(ui_state, stub, visible_ids, origin='train',
+                                        discarded_ids=discarded_ids,
+                                        selected_ids=selected_ids)
+            return panel_train, no_update
+        elif tab_type == 'eval' and active_tab == 'eval':
+            panel_eval = render_images(ui_state, stub, visible_ids, origin='eval',
+                                    discarded_ids=discarded_ids,
+                                    selected_ids=selected_ids)
+            return no_update, panel_eval
         else:
-            cur = set(int(x) for x in (eval_discarded_store or []))
-            if un_discard:
-                cur -= set(sample_ids)
-            else:
-                cur |= set(sample_ids)
-            return dash.no_update, sorted(cur)
+            return no_update, no_update
+
 
     @app.callback(
         Output('train-data-div', 'style', allow_duplicate=True),
@@ -3185,7 +3203,8 @@ def main():
         prevent_initial_call=True
     )
     def render_samples(
-        train_viewport, eval_viewport, train_flags, eval_flags, tab,
+        train_viewport, eval_viewport, 
+        train_flags, eval_flags, tab,
         train_selected_ids, eval_selected_ids
     ):
         panels = [no_update, no_update]
@@ -3272,26 +3291,19 @@ def main():
 
     @app.callback(
         Output('train-data-table', 'data', allow_duplicate=True),
-        Output('train-discarded-ids', 'data', allow_duplicate=True),
         Input('train-data-table', 'data'),
         State('train-data-table', 'data_previous'),
-        State('table-refresh-checkbox', 'value'),
-        State('train-discarded-ids', 'data')
+        State('table-refresh-checkbox', 'value')
     )
-    def denylist_deleted_rows_sample_ids(current_data, previous_data, table_checkboxes, train_discarded_store):
+    def denylist_deleted_rows_sample_ids(
+        current_data, previous_data, table_checkboxes):
         if previous_data is None or len(previous_data) == 0:
-            return no_update, no_update
+            return no_update
 
         previous_sample_ids = set([row["SampleId"] for row in previous_data])
         current_sample_ids = set([row["SampleId"] for row in current_data])
 
         diff_sample_ids = previous_sample_ids - current_sample_ids
-        if not diff_sample_ids:
-            return no_update, no_update
-
-        cur = set(int(x) for x in (train_discarded_store or []))
-        cur |= set(int(x) for x in diff_sample_ids)
-        new_store = sorted(cur)
 
         for row in previous_data:
             if row["SampleId"] in diff_sample_ids:
@@ -3301,12 +3313,12 @@ def main():
             deny_samples_operation=pb2.DenySamplesOperation(
                 sample_ids=list(diff_sample_ids))
         )
-        _ = stub.ExperimentCommand(sample_deny_request)
+        sample_deny_response = stub.ExperimentCommand(sample_deny_request)
+        del sample_deny_response
 
         if "discard_by_flag_flip" in table_checkboxes:
-            return previous_data, new_store
-        return current_data, new_store
-
+            return previous_data
+        return current_data
     
     @app.callback(
         Output('train-image-selected-ids', 'data', allow_duplicate=True),
@@ -3339,48 +3351,42 @@ def main():
     @app.callback(
         Output({'type': 'sample-img-el', 'origin': 'train', 'sid': ALL}, 'style'),
         Input('train-image-selected-ids', 'data'),
-        Input('train-discarded-ids', 'data'),
-        Input('train-sample-panel', 'children'),  # ensures imgs exist
+        Input('train-sample-panel', 'children'),  
         State({'type': 'sample-img-el', 'origin': 'train', 'sid': ALL}, 'id'),
         State({'type': 'sample-img-el', 'origin': 'train', 'sid': ALL}, 'style'),
         prevent_initial_call=True
     )
-    def update_train_img_style(selected_ids, discarded_ids, _children, ids, styles):
+    def update_train_img_highlight(selected_ids, _children, ids, styles):
         sel = set(selected_ids or [])
-        dis = set(int(x) for x in (discarded_ids or []))
         out = []
         for cid, st in zip(ids or [], styles or []):
             s = dict(st or {})
             try:
                 sid = int(cid.get('sid'))
                 s['boxShadow'] = '0 0 0 3px rgba(255,45,85,0.95)' if sid in sel else 'none'
-                s['opacity'] = 0.25 if sid in dis else 1.0
                 s.setdefault('transition', 'box-shadow 0.06s, opacity 0.1s')
             except Exception:
                 pass
             out.append(s)
         return out
 
-
+        
     @app.callback(
         Output({'type': 'sample-img-el', 'origin': 'eval', 'sid': ALL}, 'style'),
         Input('eval-image-selected-ids', 'data'),
-        Input('eval-discarded-ids', 'data'),
         Input('eval-sample-panel', 'children'),
         State({'type': 'sample-img-el', 'origin': 'eval', 'sid': ALL}, 'id'),
         State({'type': 'sample-img-el', 'origin': 'eval', 'sid': ALL}, 'style'),
         prevent_initial_call=True
     )
-    def update_eval_img_style(selected_ids, discarded_ids, _children, ids, styles):
+    def update_eval_img_highlight(selected_ids, _children, ids, styles):
         sel = set(selected_ids or [])
-        dis = set(int(x) for x in (discarded_ids or []))
         out = []
         for cid, st in zip(ids or [], styles or []):
             s = dict(st or {})
             try:
                 sid = int(cid.get('sid'))
                 s['boxShadow'] = '0 0 0 3px rgba(255,45,85,0.95)' if sid in sel else 'none'
-                s['opacity'] = 0.25 if sid in dis else 1.0
                 s.setdefault('transition', 'box-shadow 0.06s, opacity 0.1s')
             except Exception:
                 pass
