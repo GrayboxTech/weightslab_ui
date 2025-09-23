@@ -42,6 +42,9 @@ from scope_timer import ScopeTimer
 from dataclasses import dataclass
 from math import isqrt
 import random
+from flask import Response, request, abort
+import hashlib
+import io
 
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -1881,64 +1884,121 @@ def render_images(ui_state: UIState, stub, sample_ids, origin,
 
     df = ui_state.samples_df if origin == "train" else ui_state.eval_samples_df
     id_to_loss = {int(r["SampleId"]): r.get("LastLoss", None) for _, r in df.iterrows()}
+    discarded_ids = set(discarded_ids or set())
+
+    def base_img_style(sid, is_discarded):
+        return {
+            'width': f'{img_size}px',
+            'height': f'{img_size}px',
+            'margin': '0.1vh',
+            'border': '1px solid #ccc',
+            'boxSizing': 'border-box',
+            'objectFit': 'contain',
+            'imageRendering': 'auto',
+            'opacity': 0.25 if is_discarded else 1.0,
+            'transition': 'box-shadow 0.06s, opacity 0.1s',
+            'boxShadow': '0 0 0 3px rgba(255,45,85,0.95)' if sid in selected_ids else 'none',
+            'contentVisibility': 'auto',
+            'containIntrinsicSize': f'{img_size}px {img_size}px'
+        }
 
     try:
-        batch_response = stub.GetSamples(pb2.BatchSampleRequest(
-            sample_ids=sample_ids,
-            origin=origin,
-            resize_width=img_size,
-            resize_height=img_size
-        ))
-
         if task_type == "classification":
-            for sample in batch_response.samples:
-                sid = int(sample.sample_id)
-                b64 = base64.b64encode(sample.raw_data).decode('utf-8')
-                is_discarded = sid in (discarded_ids or set())
-
-                img_style = {
-                    'width': f'{img_size}px',
-                    'height': f'{img_size}px',
-                    'margin': '0.1vh',
-                    'border': '1px solid #ccc',           
-                    'boxSizing': 'border-box',
-                    'objectFit': 'contain',
-                    'imageRendering': 'auto',
-                    'opacity': 0.25 if is_discarded else 1.0,
-                    'transition': 'box-shadow 0.06s, opacity 0.1s',
-                    'boxShadow': '0 0 0 3px rgba(255,45,85,0.95)' if sid in selected_ids else 'none'
-                }
+            for sid in sample_ids:
+                sid = int(sid)
+                is_discarded = sid in discarded_ids
+                img_style = base_img_style(sid, is_discarded)
+                url = f"/img/{origin}/{sid}?w={img_size}&h={img_size}&fmt=webp"
 
                 img = html.Img(
                     id={'type': 'sample-img-el', 'origin': origin, 'sid': sid},
-                    src=f'data:image/png;base64,{b64}',
-                    style=img_style
+                    src=url,
+                    width=img_size,
+                    height=img_size,
+                    style=img_style,
+                    n_clicks=0
                 )
 
                 clickable = html.Div(
                     label_below_img(img, id_to_loss.get(sid, None), img_size),
                     id={'type': 'sample-img', 'origin': origin, 'sid': sid},
                     n_clicks=0,
-                    style={'cursor': 'pointer'}  
+                    style={'cursor': 'pointer'}
                 )
                 imgs.append(clickable)
 
         else:
+            # Segmentation: still fetch mask/pred once; render with fixed dims
+            with ScopeTimer('getSamples grpc call') as grpc_call:
+                batch_response = stub.GetSamples(pb2.BatchSampleRequest(
+                    sample_ids=sample_ids,
+                    origin=origin,
+                    resize_width=img_size,
+                    resize_height=img_size
+                ))
+            print(grpc_call)
+
             for sample in batch_response.samples:
                 sid = int(sample.sample_id)
+                is_discarded = sid in discarded_ids
+                last_loss = id_to_loss.get(sid, None)
+
                 input_b64 = base64.b64encode(sample.raw_data).decode('utf-8')
                 gt_mask_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
                 pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
-                is_discarded = sid in (discarded_ids or set())
-                last_loss = id_to_loss.get(sid, None)
 
-                triplet = render_segmentation_triplet(
-                    input_b64, gt_mask_b64, pred_mask_b64,
-                    is_selected=False,             
-                    img_size=img_size,
-                    is_discarded=is_discarded,
-                    sid=sid, last_loss=last_loss
-                )
+                def png_img(src_b64, border):
+                    return html.Img(
+                        src=f'data:image/png;base64,{src_b64}',
+                        width=img_size,
+                        height=img_size,
+                        style={'width': f'{img_size}px', 'height': f'{img_size}px', 'border': border,
+                                'contentVisibility': 'auto', 'containIntrinsicSize': f'{img_size}px {img_size}px'}
+                    )
+
+                input_img_div = html.Div([
+                    html.Img(
+                        src=f'data:image/png;base64,{input_b64}',
+                        width=img_size,
+                        height=img_size,
+                        style={'width': f'{img_size}px', 'height': f'{img_size}px', 'border': '1px solid #888',
+                                'contentVisibility': 'auto', 'containIntrinsicSize': f'{img_size}px {img_size}px'}
+                    ),
+                    html.Div(
+                        f"ID: {sid}", style={
+                            'position': 'absolute', 'top': '2px', 'left': '4px',
+                            'background': 'rgba(0,0,0,0.55)', 'color': 'white',
+                            'fontSize': '10px', 'padding': '1px 5px', 'borderRadius': '3px'
+                        }
+                    ),
+                    html.Div(
+                        f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -",
+                        style={
+                            'position': 'absolute', 'top': '2px', 'right': '4px',
+                            'background': 'rgba(0,0,0,0.55)', 'color': 'white',
+                            'fontSize': '10px', 'padding': '1px 5px', 'borderRadius': '3px'
+                        }
+                    ),
+                    html.Div("Input", style={'fontSize': 10, 'textAlign': 'center'})
+                ], style={'position': 'relative', 'display': 'inline-block',
+                            'width': f'{img_size}px', 'height': f'{img_size}px'})
+
+                triplet = html.Div([
+                    input_img_div,
+                    html.Div([png_img(gt_mask_b64, '1px solid green'),
+                                html.Div("Target", style={'fontSize': 10, 'textAlign': 'center'})]),
+                    html.Div([png_img(pred_mask_b64, '1px solid blue'),
+                                html.Div("Prediction", style={'fontSize': 10, 'textAlign': 'center'})]),
+                ], style={
+                    'display': 'flex',
+                    'flexDirection': 'row',
+                    'gap': '4px',
+                    'marginBottom': '8px',
+                    'border': '4px solid red' if sid in selected_ids else 'none',
+                    'transition': 'border 0.3s, opacity 0.3s',
+                    'opacity': 0.25 if is_discarded else 1.0
+                })
+
                 clickable = html.Div(
                     [triplet],
                     id={'type': 'sample-img', 'origin': origin, 'sid': sid},
@@ -2180,6 +2240,70 @@ def main():
 
     print(ui_state)
     app.layout = get_ui_app_layout(ui_state)
+
+    server = app.server
+    _IMAGE_CACHE = {}
+
+    @server.route("/img/<origin>/<int:sid>")
+    def serve_img(origin, sid):
+        try:
+            w = int(request.args.get("w", "128"))
+            h = int(request.args.get("h", "128"))
+            fmt = request.args.get("fmt", "webp")  
+            if origin not in ("train","eval"): abort(404)
+
+            key = (origin, sid, w, h, fmt)
+            if key in _IMAGE_CACHE:
+                data, mime, etag = _IMAGE_CACHE[key]
+            else:
+                batch = stub.GetSamples(pb2.BatchSampleRequest(
+                    sample_ids=[sid], origin=origin, resize_width=w, resize_height=h
+                ))
+                if not batch.samples: abort(404)
+                raw_png = batch.samples[0].raw_data or batch.samples[0].data
+
+                im = Image.open(io.BytesIO(raw_png)).convert("RGB")
+                buf = io.BytesIO()
+                if fmt == "webp":
+                    im.save(buf, format="WEBP", quality=78, method=4)
+                    mime = "image/webp"
+                else:
+                    im.save(buf, format="JPEG", quality=80, optimize=True)
+                    mime = "image/jpeg"
+                data = buf.getvalue()
+
+                etag = hashlib.md5(data).hexdigest()
+                _IMAGE_CACHE[key] = (data, mime, etag)
+
+            inm = request.headers.get("If-None-Match")
+            if inm and inm == etag:
+                return Response(status=304)
+
+            resp = Response(data, mimetype=mime)
+            resp.headers["Cache-Control"] = "public, no-cache"  
+            resp.headers["ETag"] = etag
+            return resp
+        except Exception as e:
+            print("img route error:", e)
+            abort(404)
+
+    def make_grid_skeleton(num_cells, origin, img_size):
+        cells = []
+        for i in range(num_cells):
+            cells.append(html.Div([
+                html.Img(
+                    id={'type':'sample-img-el', 'origin': origin, 'slot': i},  
+                    src="", loading="lazy", decoding="async",
+                    width=img_size, height=img_size,
+                    style={'width': f'{img_size}px', 'height': f'{img_size}px', 'border':'1px solid #ccc'}
+                ),
+                html.Div(id={'type':'sample-img-label', 'origin': origin, 'slot': i}, style={'fontSize':'11px', 'textAlign':'center'})
+            ], style={'display':'flex','flexDirection':'column','alignItems':'center'}))
+        return html.Div(children=cells, id={'type':'grid', 'origin':origin}, style={
+            'display':'grid',
+            'gridTemplateColumns': f'repeat({isqrt(num_cells)}, 1fr)',
+            'gap': '4px'
+        })
 
     def fetch_server_state_and_update_ui_state():
         while True:
@@ -3203,8 +3327,7 @@ def main():
         prevent_initial_call=True
     )
     def render_samples(
-        train_viewport, eval_viewport, 
-        train_flags, eval_flags, tab,
+        train_viewport, eval_viewport, train_flags, eval_flags, tab,
         train_selected_ids, eval_selected_ids
     ):
         panels = [no_update, no_update]
@@ -3213,9 +3336,12 @@ def main():
         if tab == 'train' and 'inspect_sample_on_click' in (train_flags or []) and train_viewport:
             ids = [row['SampleId'] for row in train_viewport]
             discarded_ids = set(ui_state.samples_df.loc[ui_state.samples_df['Discarded'], 'SampleId'])
-            panels[0] = render_images(ui_state, stub, ids, origin='train',
-                                    discarded_ids=discarded_ids,
-                                    selected_ids=(train_selected_ids or []))
+            with ScopeTimer('Render_images call') as render_images_t:
+                panels[0] = render_images(ui_state, stub, ids, origin='train',
+                                        discarded_ids=discarded_ids,
+                                        selected_ids=(train_selected_ids or []))
+            print(render_images_t)
+
 
         elif tab == 'eval' and 'inspect_sample_on_click' in (eval_flags or []) and eval_viewport:
             ids = [row['SampleId'] for row in eval_viewport]
@@ -3224,6 +3350,53 @@ def main():
                                     discarded_ids=discarded_ids,
                                     selected_ids=(eval_selected_ids or []))
         return panels
+    
+    @app.callback(
+        Output({'type': 'sample-img-el', 'origin': 'train', 'slot': ALL}, 'src'),
+        Output({'type': 'sample-img-label', 'origin': 'train', 'slot': ALL}, 'children'),
+        Input('train-data-table', 'derived_viewport_data'),
+        State('grid-preset-dropdown', 'value'),
+        prevent_initial_call=True
+    )
+    def update_train_slots(viewport_rows, grid_count):
+        n = grid_count
+        urls = [""] * n
+        labels = [""] * n
+        if not viewport_rows:
+            return urls, labels
+
+        rows = viewport_rows[:n]
+        img_size = int(512 / max(isqrt(n) or 1, isqrt(n) or 1))
+        for i, row in enumerate(rows):
+            sid = row['SampleId']
+            last_loss = row.get('LastLoss', None)
+            urls[i] = f"/img/train/{sid}?w={img_size}&h={img_size}&fmt=webp"
+            labels[i] = f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -"
+        return urls, labels
+    
+    @app.callback(
+        Output({'type': 'sample-img-el', 'origin': 'eval', 'slot': ALL}, 'src'),
+        Output({'type': 'sample-img-label', 'origin': 'eval', 'slot': ALL}, 'children'),
+        Input('eval-data-table', 'derived_viewport_data'),
+        State('eval-grid-preset-dropdown', 'value'),
+        prevent_initial_call=True
+    )
+    def update_eval_slots(viewport_rows, grid_count):
+        n = grid_count
+        urls = [""] * n
+        labels = [""] * n
+        if not viewport_rows:
+            return urls, labels
+
+        rows = viewport_rows[:n]
+        img_size = int(512 / max(isqrt(n) or 1, isqrt(n) or 1))
+        for i, row in enumerate(rows):
+            sid = row['SampleId']
+            last_loss = row.get('LastLoss', None)
+            urls[i] = f"/img/eval/{sid}?w={img_size}&h={img_size}&fmt=webp"
+            labels[i] = f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -"
+        return urls, labels
+
 
 
     @app.callback(
