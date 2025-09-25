@@ -46,8 +46,7 @@ from flask import Response, request, abort
 import hashlib
 import io
 
-
-logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logger = logging.getLogger("ui")
 
 _HYPERPARAM_COLUMNS = ["label", "type", "name", "value"]
 
@@ -199,6 +198,31 @@ custom_styles = {
     },
 }
 
+class KeyValueFormatter(logging.Formatter):
+    _std = {
+        'name','msg','args','levelname','levelno','pathname','filename','module',
+        'exc_info','exc_text','stack_info','lineno','funcName','created','msecs',
+        'relativeCreated','thread','threadName','processName','process','asctime',
+        'message' 
+    }
+    def format(self, record):
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(record.created))
+        base = f"{ts} {record.getMessage()}"
+        extras = {k:v for k,v in record.__dict__.items() if k not in self._std}
+        if not extras:
+            return base
+        lines = [base]
+        for k, v in sorted(extras.items()):
+            lines.append(f"{k}: {v}")
+        return "\n".join(lines)
+
+def setup_logging():
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(KeyValueFormatter())
+    root = logging.getLogger()
+    root.handlers[:] = [handler]          
+    root.setLevel(logging.INFO)
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 def exponential_smoothing(values, alpha=0.6):
     if not (0 <= alpha <= 1):
@@ -555,6 +579,15 @@ class UIState:
             if len(self.metrics_df) % 1000 == 999:
                 with self.metrics_lock:
                     self.metrics_df.to_csv(self.metrics_df_path, index=False)
+                logger.info(
+                    "metrics_checkpoint_saved",
+                    extra={
+                        "experiment": status.experiment_name,
+                        "rows": int(len(self.metrics_df)),
+                        "path": self.metrics_df_path,
+                        "run_id": self.current_run_id
+                    }
+                )
             self.met_names.add(status.metrics_status.name)
 
             if status.experiment_name not in self.exp_name_2_color:
@@ -569,9 +602,6 @@ class UIState:
                             row['metric_name'] not in other_metrics:
                         other_metrics[row['metric_name']] = row["metric_value"]
                     if len(other_metrics) == len(self.met_names):
-                        print(
-                            f"other metrics data age: ", row["model_age"],
-                            f" anotation age:", status.model_age)
                         break
 
             metadata = status.annotat_status.metadata
@@ -587,7 +617,16 @@ class UIState:
                 self.annotation.to_csv(self.annotation_path, index=False)
             self.ant_names.add(status.annotat_status.name)
 
-        print("UI.update_metrics_from_server: ", len(self.metrics_df), len(self.annotation), end="\r")
+            logger.info(
+                "annotation_recorded",
+                extra={
+                    "experiment": status.experiment_name,
+                    "model_age": status.model_age,
+                    "annotation": status.annotat_status.name,
+                    "annotation_path": self.annotation_path,
+                    "run_id": self.current_run_id
+                }
+            )
 
     # updated function to take lists instead of maps
 
@@ -634,7 +673,10 @@ class UIState:
                     self.eval_samples_df = df[all_columns]
 
         except Exception as e:
-            print("Error processing sample:", e)
+            logger.exception(
+                "sample_update_failed",
+                extra={"origin": getattr(sample_statistics, "origin", None)}
+            )
 
 
 
@@ -1249,8 +1291,10 @@ def interactable_layers(
                 get_layer_div(
                     layer_row, layer_neurons_df, ui_state, checklist_values))
         except Exception as e:
-            print("neurons_df: ", ui_state.get_neurons_df().head())
-            print(f"Error getting layer data: {layer_row['layer_id']}: {e}")
+            logger.exception(
+                "layer_render_failed",
+                extra={"layer_id": int(layer_row.get("layer_id", -1))}
+            )
             continue
 
     return html.Div(
@@ -2008,7 +2052,7 @@ def render_images(ui_state: UIState, stub, sample_ids, origin,
                 imgs.append(clickable)
 
     except Exception as e:
-        print(f"[ERROR] {origin} sample rendering failed: {e}")
+        logger.exception("sample_render_failed", extra={"origin": origin})
         return no_update
 
 
@@ -2174,7 +2218,7 @@ def parse_args():
     )
     args = parser.parse_args()
     if not os.path.isdir(args.root_directory):
-        print(f"Error: {args.root_directory} is not a valid directory.")
+        logger.error("invalid_root_directory", extra={"root_directory": args.root_directory})
         sys.exit(1)
     return args
 
@@ -2224,18 +2268,22 @@ def main():
         </html>
         '''
 
+
+    setup_logging()
+
+    logging.getLogger("dash").disabled = True
+    dash._utils.show_server = lambda *a, **k: None
     get_initial_state_request = pb2.TrainerCommand(
         get_hyper_parameters=True,
         get_interactive_layers=True,
         # get_data_records="train",
     )
-    print("[UI] About Fetching initial state.")
+    logger.info("About Fetching initial state.")
 
     with ScopeTimer(tag="initial_state_fetch_and_update") as t:
         initial_state_response = stub.ExperimentCommand(
             get_initial_state_request)
-    print(t)
-    print("[UI] FetchiED initial state.")
+    logger.info("Fetched initial state.", extra={"scope_timer": str(t)})
     ui_state.update_from_server_state(initial_state_response)
 
     print(ui_state)
@@ -2339,13 +2387,18 @@ def main():
     )
     def send_to_controller_hyper_parameters_on_change(
             hyper_param_values, resume_pause_clicks):
-        print(
-            f"[UI] WeightsLab.send_to_controller_hyper_parameters_on_change"
-            f" {hyper_param_values}, {resume_pause_clicks}")
         ctx = dash.callback_context
 
         if not ctx.triggered:
             return no_update
+
+        logger.info(
+            "[UI] Hyper parameters on change",
+            extra={
+                "hyper_param_values": hyper_param_values,
+                "resume_pause_clicks": resume_pause_clicks,
+            }
+        )
 
         button_children = no_update
         prop_id = ctx.triggered[0]['prop_id']
@@ -2489,7 +2542,6 @@ def main():
         Input({"type": "layer-rem-btn", "layer_id": ALL}, "n_clicks"),
     )
     def on_layer_remove_neuron_callback(_,):
-        print(f"[UI] WeightsLab.on_layer_remove_neuron_callback.")
         ctx = dash.callback_context
 
         if not ctx.triggered:
@@ -2514,14 +2566,17 @@ def main():
 
         request = pb2.WeightsOperationRequest(weight_operation=weight_operation)
         response = stub.ManipulateWeights(request)
-        print(f"Response: {response}")
+        logger.info("Removed neuron", extra={
+            "layer_id": int(layer_id),
+            "neuron_id": int(layer_details.outgoing - 1),
+            "resp_message": getattr(response, "message", "")[:200]
+        })
 
     @app.callback(
         Input({"type": "layer-add-btn", "layer_id": ALL}, "n_clicks"),
         State('zerofy-options-checklist', 'value')
     )
     def on_layer_add_neurons_callback(n_clicks, zerofy_opts):
-        print(f"[UI] WeightsLab.on_layer_add_neurons_callback.")
         nonlocal ui_state
         if not ctx.triggered:
             return dash.no_update
@@ -2541,6 +2596,7 @@ def main():
             neurons_to_add=n_add
         )
         stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=add_op))
+        logger.info("Added neurons", extra={"layer_id": int(layer_id), "count": int(n_add)})
 
         state = stub.ExperimentCommand(pb2.TrainerCommand(
             get_interactive_layers=True,
@@ -2567,7 +2623,6 @@ def main():
 
 
         if not selected_to_ids and not predicates:
-            print("[UI] No ZEROFY targets (no selection & no predicates).")
             return 
 
         zerofy_op = pb2.WeightOperation(
@@ -2580,7 +2635,13 @@ def main():
             zerofy_op.zerofy_predicates.extend(predicates)
 
         resp = stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=zerofy_op))
-        print(resp.message)
+        logger.info("Applied zerofy", extra={
+            "to_layer_id": int(next_layer_id),
+            "from_count": int(len(new_from_ids)),
+            "to_selected_count": len(selected_to_ids),
+            "predicates": [int(p) for p in (predicates or [])],
+            "resp_message": getattr(resp, "message", "")[:200]
+        })
 
         ui_state.update_from_server_state(
             stub.ExperimentCommand(pb2.TrainerCommand(
@@ -2594,7 +2655,6 @@ def main():
         Input({"type": "layer-freeze-btn", "layer_id": ALL}, "n_clicks"),
     )
     def on_layer_freeze_neuron_callback(_):
-        print(f"[UI] WeightsLab.on_layer_freeze_neuron_callback")
         ctx = dash.callback_context
 
         if not ctx.triggered:
@@ -2611,8 +2671,10 @@ def main():
         request = pb2.WeightsOperationRequest(
             weight_operation=weight_operation)
         response = stub.ManipulateWeights(request)
-
-        print(f"Freeze layer response: {response}")
+        logger.info("Froze layer", extra={
+            "layer_id": int(layer_id),
+            "resp_message": getattr(response, "message", "")[:200]
+        })
 
     @app.callback(
         Output('modal-weights-edit', 'is_open'),
@@ -2620,7 +2682,6 @@ def main():
         prevent_initial_call=True
     )
     def inspect_neurons_weights_by_btn(n_clicks):
-        print("[UI] Inspcting layer  weights !", n_clicks)
         if not any(click and click > 0 for click in n_clicks):
             return no_update
 
@@ -2633,7 +2694,8 @@ def main():
         btn_dict = eval(prop_id.split('.')[0])
         layer_id = btn_dict['layer_id']
 
-        print("Inspecting weights of layer ", layer_id)
+        logger.info("Inspecting weights of layer", extra={"layer_id": int(layer_id)})
+
         return True
 
     @app.callback(
@@ -2642,12 +2704,12 @@ def main():
         prevent_initial_call=True  # Skip initial execution
     )
     def display_weights_of_neuron(selected_rows):
-        print(f"[UI] WeightsLab.display_weights_of_neuron {selected_rows}")
         if not selected_rows:
             return no_update
 
         selected_row_index = selected_rows
-        print("selected_row_index: ", selected_row_index)
+        logger.info("Selected neuron row indices", extra={"indices": list(map(int, selected_rows))})
+
         # row = data[selected_row_index]
         # print("Selected row: ", row)
 
@@ -2660,9 +2722,6 @@ def main():
     )
     def run_query_on_neurons(_, query, weight, action, zerofy_opts):
         nonlocal ui_state
-        print(
-            f"[UI] WeightsLab.run_query_on_neurons {query}, {weight}, "
-            f"{action} {ui_state.get_neurons_df()}")
         if weight is None:
             weight = 1.0
 
@@ -2670,10 +2729,9 @@ def main():
         try:
             selected_neurons_df = ui_state.get_neurons_df().query(query)
         except Exception as e:
-            print(f"Error: {e} ", ui_state.get_neurons_df())
+            logger.warning("Neuron query failed", extra={"query": str(query), "error": repr(e)})
             return
 
-        print("Selected neurons:", selected_neurons_df)
         sample_params = {}
         if weight <= 1.0:
             sample_params["frac"] = weight
@@ -2687,6 +2745,10 @@ def main():
             for _, row in selected_neurons_df.iterrows():
                 selected_neurons[row["layer_id"]].append(row["neuron_id"])
             ui_state.selected_neurons = selected_neurons
+            logger.info("Selected neurons", extra={
+                "query": str(query),
+                "count": int(len(selected_neurons_df)),
+            })
             return
 
         weight_operation = None
@@ -2711,7 +2773,7 @@ def main():
                 elif isinstance(weight, int) and weight >= 1:
                     neurons_to_add = int(weight)
                 else:
-                    print(f"[UI][query add] Invalid weight for add_neurons: {weight}")
+                    logger.warning("Invalid weight for add neurons", extra={"weight": weight})
                     continue
 
                 next_layer_id = _get_next_layer_id(ui_state, layer_id)
@@ -2723,6 +2785,10 @@ def main():
                     neurons_to_add=neurons_to_add
                 )
                 stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=add_op))
+                logger.info("Added neurons by query", extra={
+                    "layer_id": int(layer_id),
+                    "count": int(neurons_to_add)
+                })
 
                 if next_layer_id is None or old_incoming is None:
                     continue
@@ -2751,6 +2817,13 @@ def main():
                     zerofy_op.zerofy_predicates.extend(predicates)
 
                 resp = stub.ManipulateWeights(pb2.WeightsOperationRequest(weight_operation=zerofy_op))
+                logger.info("Applied zerofy by query", extra={
+                    "to_layer_id": int(next_layer_id),
+                    "from_count": int(len(new_from_ids)),
+                    "to_selected_count": len(selected_to_ids),
+                    "predicates": [int(p) for p in (predicates or [])],
+                    "resp_message": getattr(resp, "message", "")[:200]
+                })
                 print(resp.message)
 
             ui_state.update_from_server_state(
@@ -2763,7 +2836,11 @@ def main():
 
         if weight_operation:
             for idx, row in selected_neurons_df.reset_index().iterrows():
-                print("Selected neuron row: ", idx, row)
+                logger.debug("Selected neuron row", extra={
+                    "index": int(idx),
+                    "layer_id": int(row['layer_id']),
+                    "neuron_id": int(row['neuron_id'])
+                })
                 neuron_id = pb2.NeuronId(
                     layer_id=row['layer_id'],
                     neuron_id=row['neuron_id'])
@@ -2772,10 +2849,12 @@ def main():
         if weight_operation:
             request = pb2.WeightsOperationRequest(
                 weight_operation=weight_operation)
-            print(f"Weight operation request: {request}")
             response = stub.ManipulateWeights(request)
-            print(f"Weight operation response: {response}")
-
+            logger.info("Applied neuron operation", extra={
+                "operation": pb2.WeightOperationType.Name(weight_operation.op_type),
+                "count": int(len(weight_operation.neuron_ids)),
+                "resp_message": getattr(response, "message", "")[:200]
+            })
     
     @app.callback(
         Output({'type': 'layer-side-panel', 'layer_id': MATCH}, 'style'),
@@ -2841,8 +2920,6 @@ def main():
         origin = origin_value or "eval"
         resp = stub.GetActivations(pb2.ActivationRequest(
             layer_id=layer_id, sample_id=sample_id, origin=origin))
-
-        print(f"[UI] WeightsLab.render_layer_activation {layer_id}, {sample_id}, {origin} => {str(resp)[:200]}")
 
         # count = int(getattr(resp, "neurons_count", 0) or 0)
         # if neurons_count <= 0:
@@ -3086,7 +3163,8 @@ def main():
             try:
                 df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
             except Exception as e:
-                print(f"[ERROR] Failed to sort train data: {e}")
+                logger.warning("Train table sort failed", extra={"query": str(query)})
+
 
         num_available_samples = (~df["Discarded"]).sum()
         selected_count = len(train_selected_ids or [])
@@ -3122,7 +3200,8 @@ def main():
             try:
                 df = df.sort_values(by=sort_info['cols'], ascending=sort_info['dirs'])
             except Exception as e:
-                print(f"[ERROR] Failed to sort eval data: {e}")
+                logger.warning("Eval table sort failed", extra={"query": str(query)})
+
         num_available_samples = (~df["Discarded"]).sum()
         selected_count = len(eval_selected_ids or [])
         return df.to_dict('records'), f"Eval Dataset #{num_available_samples} samples | {selected_count} selected"
@@ -3240,7 +3319,13 @@ def main():
                 request.deny_eval_samples_operation.CopyFrom(deny_op)
                 request.deny_eval_samples_operation.accumulate = accumulate
         resp = stub.ExperimentCommand(request)
-        print(f"[{tab_type}] deny resp: {resp.message}")
+        logger.info("Updated samples", extra={
+            "tab": tab_type,                          
+            "action": ("undiscard" if un_discard else "deny"),
+            "count": int(len(sample_ids)),
+            "accumulate": bool(accumulate),
+            "resp_msg": getattr(resp, "message", "")[:200]
+        })
 
         with ui_state.lock:
             if tab_type == "train":
@@ -3284,7 +3369,6 @@ def main():
         State('train-data-div', 'style'),
     )
     def update_train_data_div_style(inspect_checkboxes, old_div_style):
-        print(f"[UI] WeightsLab.update_train_data_div_style {inspect_checkboxes}")
         width_percent = 45
         width_percent_delta = (90 - width_percent) // 2
 
@@ -3336,11 +3420,9 @@ def main():
         if tab == 'train' and 'inspect_sample_on_click' in (train_flags or []) and train_viewport:
             ids = [row['SampleId'] for row in train_viewport]
             discarded_ids = set(ui_state.samples_df.loc[ui_state.samples_df['Discarded'], 'SampleId'])
-            with ScopeTimer('Render_images call') as render_images_t:
-                panels[0] = render_images(ui_state, stub, ids, origin='train',
-                                        discarded_ids=discarded_ids,
-                                        selected_ids=(train_selected_ids or []))
-            print(render_images_t)
+            panels[0] = render_images(ui_state, stub, ids, origin='train',
+                                    discarded_ids=discarded_ids,
+                                    selected_ids=(train_selected_ids or []))
 
 
         elif tab == 'eval' and 'inspect_sample_on_click' in (eval_flags or []) and eval_viewport:
@@ -3720,7 +3802,7 @@ def main():
                         x_data[min_index], y_data[min_index], t_idx, min_index,
                         distances[min_index])
             except Exception as e:
-                print(f"Error in update_selection_of_checkpoint: {e}")
+                logger.warning("Error while updating checkpoint selection", extra={"error": repr(e)})
                 continue
 
         checkpoint_id_to_load = None
@@ -3741,7 +3823,11 @@ def main():
             ckpt_load_result = stub.ExperimentCommand(
                 load_checkpoint_request)
 
-            print(f"Checkpoint load result: {ckpt_load_result}")
+            logger.info("Loaded checkpoint", extra={
+                "checkpoint_id": str(checkpoint_id_to_load),
+                "ok": getattr(ckpt_load_result, "success", None),
+                "resp_msg": getattr(ckpt_load_result, "message", "")[:200]
+            })
             ui_state.current_run_id += 1
 
             update_request = pb2.TrainerCommand(
@@ -3752,14 +3838,14 @@ def main():
             ui_state.update_from_server_state(updated_state)
 
             if checkpoint_id_to_load is not None:
-                print("Figure data: ", figure['data'][t_min])
+                logger.debug("Figure data for loaded checkpoint", extra={"trace_index": int(t_min)})
 
             return figure, None
 
         return figure, no_update
 
 
-    app.run(debug=False, port=8050)
+    app.run(debug=False, port=8050, use_reloader=False)
 
 if __name__ == '__main__':
     main()
