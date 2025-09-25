@@ -21,13 +21,15 @@ import traceback
 
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-from imagenet_exp import get_exp
+# from imagenet_exp import get_exp
 # from imagenet_exp_deep import get_exp
 # from imagenet_convnext import get_exp
 # from mnist_exp_fully_conv import get_exp
 # from imagenet_effnet_exp import get_exp
 # from segmentation_exp import get_exp
 # from cad_models_exp import get_exp
+
+from vad_exp import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
@@ -820,8 +822,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 ds, request.sample_id, experiment.device)
 
             with torch.no_grad():
-                req = {request.layer_id: None}
-                _, intermediaries = experiment.model.forward(x, intermediary_outputs=req)
+                intermediaries = {request.layer_id: None}
+                _= experiment.model.forward(x, intermediary_outputs=intermediaries)
 
             if intermediaries[request.layer_id] is None:
                 raise ValueError(f"No intermediary layer {request.layer_id}")
