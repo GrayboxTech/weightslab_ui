@@ -2276,7 +2276,7 @@ def main():
     get_initial_state_request = pb2.TrainerCommand(
         get_hyper_parameters=True,
         get_interactive_layers=True,
-        # get_data_records="train",
+        get_data_records="train",
     )
     logger.info("About Fetching initial state.")
 
