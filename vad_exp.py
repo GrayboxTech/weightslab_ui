@@ -104,16 +104,29 @@ class ConvNet(NetworkWithOps, nn.Module):
     def forward(self, x, intermediary_outputs=None):
         self.maybe_update_age(x)
         # Block 1: conv -> BN -> ReLU -> max pool
-        x = F.relu(self.bnorm1(self.conv1(x, intermediary=intermediary_outputs)))
-        x = F.max_pool2d(x, 2)  # reduces spatial size from 256 -> 128
+        # x = F.relu(self.bnorm1(self.conv1(x, intermediary=intermediary_outputs)))
+        # x = F.max_pool2d(x, 2)  # reduces spatial size from 256 -> 128
+
+        x = self.conv1(x, intermediary=intermediary_outputs)
+        x = self.bnorm1(x, intermediary=intermediary_outputs)   
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
 
         # Block 2
-        x = F.relu(self.bnorm2(self.conv2(x, intermediary=intermediary_outputs)))
+        #  x = F.relu(self.bnorm2(self.conv2(x, intermediary=intermediary_outputs)))
         # x = F.max_pool2d(x, 7)  # 128 -> 64
 
+        x = self.conv2(x, intermediary=intermediary_outputs)
+        x = self.bnorm2(x, intermediary=intermediary_outputs)  
+        x = F.relu(x)
+
         # Block 3
-        x = F.relu(self.bnorm3(self.conv3(x, intermediary=intermediary_outputs)))
+        # x = F.relu(self.bnorm3(self.conv3(x, intermediary=intermediary_outputs)))
         # x = F.max_pool2d(x, 7)  # 64 -> 32
+
+        x = self.conv3(x, intermediary=intermediary_outputs)
+        x = self.bnorm3(x, intermediary=intermediary_outputs)  
+        x = F.relu(x)
 
         # # Block 4
         # x = F.relu(self.bnorm4(self.conv4(x, intermediary=intermediary_outputs)))
@@ -149,7 +162,7 @@ val_transform = T.Compose([
     T.Normalize(IM_MEAN, IM_STD),
 ])
 
-root_dir = '/home/rotaru/Desktop/GRAYBOX/pilots/VAD/VAD'
+root_dir = 'VAD'
 
 
 train_dataset = ds.ImageFolder(

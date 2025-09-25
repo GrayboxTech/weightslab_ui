@@ -2187,6 +2187,24 @@ def _tile_img_component(z: np.ndarray) -> html.Img:
     uri = _png_data_uri_from_rgb(rgb)
     return html.Img(src=uri, draggable="false", style=style)
 
+def _render_spatial_grid(resp):
+    graphs = []
+    is_spatial = ("Conv2d" in (resp.layer_type or "")) or ("BatchNorm2d" in (resp.layer_type or ""))
+    if not is_spatial or resp.neurons_count == 0:
+        return graphs
+    for i in range(resp.neurons_count):
+        amap = resp.activations[i]
+        vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
+        max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
+        fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
+        graphs.append(
+            html.Div(
+                dcc.Graph(figure=fig, config={'displayModeBar': False},
+                            style={'height': '40px', 'width': '40px'}),
+                style={'display': 'inline-block'}
+            )
+        )
+    return graphs
 
 def get_ui_app_layout(ui_state: UIState) -> html.Div:
     layout_children = [
@@ -2915,60 +2933,48 @@ def main():
             return dash.no_update, {'display': 'none'}
 
         layer_id = int(act_id['layer_id'])
-        sample_id, origin = 0, "eval"
         sample_id = int(sample_value) if sample_value is not None else 0
         origin = origin_value or "eval"
-        resp = stub.GetActivations(pb2.ActivationRequest(
-            layer_id=layer_id, sample_id=sample_id, origin=origin))
 
-        # count = int(getattr(resp, "neurons_count", 0) or 0)
-        # if neurons_count <= 0:
-        #     block = html.Div([html.Small("No activations available")],
-        #                     style={'borderTop': '1px solid #eee', 'paddingTop': '6px'})
-        #     return [block], {'display': 'block'}
+        resp_pre = stub.GetActivations(pb2.ActivationRequest(
+            layer_id=layer_id, sample_id=sample_id, origin=origin
+        ))
 
-        graphs = []
-        if "Conv2d" in (resp.layer_type or ""):
-            for i in range(resp.neurons_count):
-                amap = resp.activations[i]
-                vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
-                max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
+        is_conv = "Conv2d" in (getattr(resp_pre, "layer_type", "") or "")
+        resp_post = None
+        if is_conv:
+            bn_layer_id = layer_id + 1 
+            resp_post = stub.GetActivations(pb2.ActivationRequest(
+                layer_id=bn_layer_id, sample_id=sample_id, origin=origin
+            ))
 
-                # print(f"conv2d[{i}: ", vals, vals.shape, max_abs)
-                fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
-                graphs.append(
-                    html.Div(
-                        dcc.Graph(figure=fig, config={'displayModeBar': False},
-                                style={'height': '40px', 'width': '40px'}),
-                        style={'display': 'inline-block'}
-                    )
-                )
-        else:
-            scalars = np.array([resp.activations[i].values[0] for i in range(resp.neurons_count)], dtype=float)
-            max_abs = float(np.max(np.abs(scalars))) if scalars.size else 1.0
-            z = scalars.reshape(1, -1)  # (1, N)
-            fig = _make_heatmap_figure(z, zmin=-max_abs, zmax=+max_abs)
-            width = max(20, min(20 * z.shape[1], 600))
-            graphs.append(
-                html.Div(
-                    dcc.Graph(figure=fig, config={'displayModeBar': False},
-                            style={'height': '20px', 'width': f'{width}px'}),
-                    style={'display': 'inline-block'}
-                )
+        pre_grid = _render_spatial_grid(resp_pre)
+        post_grid = _render_spatial_grid(resp_post) if resp_post else []
+        columns = []
+        pre_label = "pre-BN" if is_conv else ""
+        columns.append(
+            html.Div([
+                html.Small(pre_label, style={'opacity': 0.7}),
+                html.Div(pre_grid, style={'display': 'grid', 'gap': '4px', 'paddingRight': '6px'})
+            ], style={'display': 'flex', 'flexDirection': 'column', 'rowGap': '4px'})
+        )
+        if post_grid:
+            columns.append(
+                html.Div([
+                    html.Small("post-BN", style={'opacity': 0.7}),
+                    html.Div(post_grid, style={'display': 'grid', 'gap': '4px', 'paddingRight': '6px'})
+                ], style={'display': 'flex', 'flexDirection': 'column', 'rowGap': '4px'})
             )
 
         block = html.Div(
-            [
-                html.Div(
-                    graphs,
-                    style={
-                        'display': 'grid',
-                        'gap': '4px',
-                        'paddingRight': '6px'
-                    }
-                )
-            ],
-            style={'borderTop': '1px solid #eee', 'paddingTop': '6px'}
+            columns,
+            style={
+                'display': 'grid',
+                'gridTemplateColumns': f'repeat({len(columns)}, auto)',
+                'columnGap': '12px',
+                'borderTop': '1px solid #eee',
+                'paddingTop': '6px'
+            }
         )
         return [block], {'display': 'block'}
 

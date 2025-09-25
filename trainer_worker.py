@@ -809,6 +809,10 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         empty_resp = pb2.ActivationResponse(layer_type="", neurons_count=0)
 
         try:
+            last_layer = experiment.model.layers[-1]
+            last_layer_id = int(last_layer.get_module_id())
+            if int(request.layer_id) == last_layer_id:
+                return empty_resp
             ds = experiment.train_loader.dataset
             if request.origin == "eval":
                 ds = experiment.eval_loader.dataset
