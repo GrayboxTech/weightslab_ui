@@ -1486,6 +1486,16 @@ def _parse_chw(s):
         C, H, W = map(int, m.groups())
         return (C, H, W)
 
+def _renorm_to_unit(vals, eps=1e-8, robust=False, p=99.0):
+    if robust:
+        scale = np.nanpercentile(np.abs(vals), p)
+    else:
+        scale = np.nanmax(np.abs(vals))
+    if not np.isfinite(scale) or scale < eps:
+        return np.zeros_like(vals)
+    out = vals / scale
+    return np.clip(out, -1.0, 1.0)
+
 def _make_heatmap_figure(z, zmin=None, zmax=None):
     fig = go.Figure(
         data=[go.Heatmap(
@@ -2195,8 +2205,9 @@ def _render_spatial_grid(resp):
     for i in range(resp.neurons_count):
         amap = resp.activations[i]
         vals = np.array(amap.values, dtype=float).reshape(amap.H, amap.W)
-        max_abs = float(np.max(np.abs(vals))) if vals.size else 1.0
-        fig = _make_heatmap_figure(vals, zmin=-max_abs, zmax=+max_abs)
+        # renormalize to [-1, 1]
+        vals = _renorm_to_unit(vals, robust=False)
+        fig = _make_heatmap_figure(vals, zmin=-1.0, zmax=+1.0)
         graphs.append(
             html.Div(
                 dcc.Graph(figure=fig, config={'displayModeBar': False},
