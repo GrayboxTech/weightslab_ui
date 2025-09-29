@@ -155,14 +155,11 @@ val_transform = T.Compose([
 
 root_dir = 'VAD'
 
-train_dataset = ds.ImageFolder(
-    os.path.join(root_dir, "train"), transform=train_transform)
+train_dataset = ds.ImageFolder(os.path.join(root_dir, "train"), transform=train_transform)
+val_dataset   = ds.ImageFolder(os.path.join(root_dir, "test"),  transform=val_transform)
 
-def map_to_binary(y):
-    return 1 if y == 1 else 0
-
-val_dataset = ds.ImageFolder(
-    os.path.join(root_dir, "test"), transform=val_transform, target_transform=map_to_binary)
+print(train_dataset.class_to_idx) 
+print(val_dataset.class_to_idx) 
 
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
