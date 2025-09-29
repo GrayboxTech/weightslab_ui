@@ -29,7 +29,8 @@ import traceback
 # from segmentation_exp import get_exp
 # from cad_models_exp import get_exp
 
-from vad_exp import get_exp
+# from vad_exp import get_exp
+from vad_unet_exp import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
