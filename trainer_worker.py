@@ -21,7 +21,7 @@ import traceback
 
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-# from imagenet_exp import get_exp
+from imagenet_exp import get_exp
 # from imagenet_exp_deep import get_exp
 # from imagenet_convnext import get_exp
 # from mnist_exp_fully_conv import get_exp
@@ -30,7 +30,8 @@ import traceback
 # from cad_models_exp import get_exp
 
 # from vad_exp import get_exp
-from vad_unet_exp import get_exp
+# from vad_unet_exp import get_exp
+# from vad_unet_recon_clsf import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
@@ -185,37 +186,62 @@ def mask_to_png_bytes(mask, num_classes=21):
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     # print("[BACKEND].get_data_set_representation")
 
-    all_rows = list(dataset.as_records())
-
     sample_stats = pb2.SampleStatistics()
     sample_stats.sample_count = len(dataset.wrapped_dataset)
-    task_type = getattr(experiment, "task_type", "classification")
+
+    task_type = getattr(experiment, "task_type", getattr(dataset, "task_type", "classification"))
     sample_stats.task_type = task_type
 
-    for sample_id, row in enumerate(all_rows):
-        target = row.get("label", row.get("target", -1))
-        pred = row.get("prediction_raw", -1)
+    ignore_index = getattr(dataset, "ignore_index", 255)
+    num_classes = getattr(dataset, "num_classes", getattr(experiment, "num_classes", None))
 
-        if task_type == "classification":
-            target_list = [int(target)] if not isinstance(target, (list, np.ndarray)) else [int(np.array(target).item())]
-            pred_list = [int(pred)] if not isinstance(pred, (list, np.ndarray)) else [int(np.array(pred).item())]
-        elif task_type == "segmentation":
-            if hasattr(target, 'cpu'):  
-                target_arr = target.cpu().numpy()
-            else:
-                target_arr = np.array(target)
-            if hasattr(pred, 'cpu'):
-                pred_arr = pred.cpu().numpy()
-            else:
-                pred_arr = np.array(pred)
-            target_classes = np.unique(target_arr)
-            pred_classes = np.unique(pred_arr)
-            target_list = [int(x) for x in target_classes]
-            pred_list = [int(x) for x in pred_classes]
+    for sample_id, row in enumerate(dataset.as_records()):
+        target_list, pred_list = [], []
+
+        if task_type == "segmentation":
+            # target: unique classes from the actual 2D mask
+            try:
+                _, _, label = dataset._getitem_raw(sample_id)
+                arr = label.detach().cpu().numpy() if isinstance(label, torch.Tensor) else np.asarray(label)
+                if arr.ndim == 2:
+                    u = np.unique(arr.astype(np.int64))
+                    u = u[u != int(ignore_index)]
+                    if num_classes is not None:
+                        u = u[(u >= 0) & (u < int(num_classes))]
+                    target_list = [int(v) for v in u.tolist()]
+            except Exception:
+                pass
+
+            # prediction: unique classes from stored pred mask (if any)
+            pred = row.get("prediction_raw", None)
+            try:
+                arr = pred.detach().cpu().numpy() if isinstance(pred, torch.Tensor) else np.asarray(pred)
+                if arr.ndim == 2:
+                    u = np.unique(arr.astype(np.int64))
+                    u = u[u != int(ignore_index)]
+                    if num_classes is not None:
+                        u = u[(u >= 0) & (u < int(num_classes))]
+                    pred_list = [int(v) for v in u.tolist()]
+            except Exception:
+                pass
 
         else:
-            target_list = [int(target)] if not isinstance(target, (list, np.ndarray)) else [int(np.array(target).item())]
-            pred_list = [int(pred)] if not isinstance(pred, (list, np.ndarray)) else [int(np.array(pred).item())]
+            tgt = row.get("label", row.get("target", -1))
+            try:
+                tarr = tgt.detach().cpu().numpy() if isinstance(tgt, torch.Tensor) else np.asarray(tgt)
+                if tarr.size == 1: 
+                    target_list = [int(tarr.reshape(-1)[0])]
+            except Exception:
+                pass
+
+            pred = row.get("prediction_raw", -1)
+            try:
+                parr = pred.detach().cpu().numpy() if isinstance(pred, torch.Tensor) else np.asarray(pred)
+                if parr.size == 1: 
+                    pred_list = [int(parr.reshape(-1)[0])]
+            except Exception:
+                pass
+
         record = pb2.RecordMetadata(
             sample_id=row.get('sample_id', sample_id),
             sample_label=target_list,
@@ -328,7 +354,8 @@ def process_sample(sid, dataset, do_resize, resize_dims):
         except Exception:
             raw_bytes = transformed_bytes 
 
-        task_type = getattr(dataset, "task_type", getattr(experiment, "task_type", "classification"))
+        task_type = getattr(experiment, "task_type", getattr(dataset, "task_type", "classification"))
+
         cls_label = -1
         mask_bytes = b""
         pred_bytes = b""

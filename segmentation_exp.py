@@ -118,22 +118,21 @@ class UNet(NetworkWithOps, nn.Module):
         out = self.outc(d1)    # [B, num_classes, H, W]
         return out
 
-train_dataset = VOCSegmentationWithIndex(
-    root=DATA_ROOT, year=VOC_YEAR, image_set='train', download=True, transforms=dual_transform
+train_dataset = VOCSegmentation(
+    root=DATA_ROOT, year=VOC_YEAR, image_set='train',
+    download=True, transforms=dual_transform
 )
 
-img, mask, idx = train_dataset[0]
-print(np.unique(mask.numpy()))
-
-val_dataset = VOCSegmentationWithIndex(
-    root=DATA_ROOT, year=VOC_YEAR, image_set='val', download=True, transforms=dual_transform
+val_dataset = VOCSegmentation(
+    root=DATA_ROOT, year=VOC_YEAR, image_set='val',
+    download=True, transforms=dual_transform
 )
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 tmp_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
 for batch in tmp_loader:
-    img, mask, idx = batch 
+    img, mask = batch 
     break 
 task_config = {
     "type": "segmentation",
@@ -167,8 +166,8 @@ def get_exp():
         metrics=metrics,
         training_steps_to_do=25600,
         name="voc2012-seg-test2",
-        root_log_dir="voc2012-seg-test2",
-        logger=Dash("voc2012-seg-test2"),
+        root_log_dir="test_seg",
+        logger=Dash("test_seg"),
         skip_loading=False,
         task_type="segmentation" 
     )
