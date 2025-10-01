@@ -21,7 +21,7 @@ import traceback
 
 # from hct_kaggle_exp import get_exp
 # from cifar_exp import get_exp
-from imagenet_exp import get_exp
+# from imagenet_exp import get_exp
 # from imagenet_exp_deep import get_exp
 # from imagenet_convnext import get_exp
 # from mnist_exp_fully_conv import get_exp
@@ -31,7 +31,7 @@ from imagenet_exp import get_exp
 
 # from vad_exp import get_exp
 # from vad_unet_exp import get_exp
-# from vad_unet_recon_clsf import get_exp
+from vad_unet_recon import get_exp
 
 experiment = get_exp()
 # experiment.set_is_training(True)
@@ -254,11 +254,25 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
 
     return sample_stats
 
-def tensor_to_bytes(tensor):
-    # Convert tensor to numpy array and transpose to (H, W, C) format
-    if tensor.shape[0] > 1:
-        np_img = tensor.numpy().transpose(1, 2, 0)
-        np_img = (np_img * 255).astype(np.uint8)
+def _maybe_denorm(img_t, mean=None, std=None):
+    if mean is None or std is None: 
+        return img_t
+    if img_t.ndim != 3 or img_t.shape[0] not in (1,3):
+        return img_t
+    m = torch.tensor(mean, dtype=img_t.dtype, device=img_t.device).view(-1,1,1)
+    s = torch.tensor(std,  dtype=img_t.dtype, device=img_t.device).view(-1,1,1)
+    return img_t * s + m
+
+def tensor_to_bytes(tensor, mean=None, std=None):
+    if isinstance(tensor, torch.Tensor):
+        tensor = tensor.detach().cpu()
+
+    if tensor.dtype.is_floating_point:
+        tensor = _maybe_denorm(tensor, mean, std)
+        tensor = torch.clamp(tensor, 0.0, 1.0)  
+
+    if tensor.ndim == 3 and tensor.shape[0] > 1:
+        np_img = (tensor.numpy().transpose(1, 2, 0) * 255.0).astype(np.uint8)
         mode = "RGB"
     else:
         np_img = tensor.squeeze(0).numpy()
@@ -276,6 +290,10 @@ def load_raw_image(dataset, index):
     wrapped = getattr(dataset, "wrapped_dataset", dataset)
     if hasattr(wrapped, "images") and isinstance(wrapped.images, list):
         img_path = wrapped.images[index]
+        img = Image.open(img_path)
+        return img.convert("RGB")
+    elif hasattr(wrapped, "files") and isinstance(wrapped.files, list):
+        img_path = wrapped.files[index]
         img = Image.open(img_path)
         return img.convert("RGB")
     elif hasattr(wrapped, "data"):
@@ -379,6 +397,20 @@ def process_sample(sid, dataset, do_resize, resize_dims):
                     pred_mask = dataset.get_prediction_mask(sid)
                     if pred_mask is not None:
                         pred_bytes = mask_to_png_bytes(pred_mask, num_classes=num_classes)
+            except Exception:
+                pred_bytes = b""
+
+        elif task_type == "reconstruction":
+            mask_bytes = raw_bytes if raw_bytes else transformed_bytes
+
+            try:
+                if hasattr(dataset, "get_prediction_mask"):
+                    recon = dataset.get_prediction_mask(sid)
+                    if recon is not None:
+                        r = recon.detach().cpu() if isinstance(recon, torch.Tensor) else torch.tensor(recon)
+                        if r.ndim == 2:
+                            r = r.unsqueeze(0)
+                        pred_bytes = tensor_to_bytes(r) 
             except Exception:
                 pred_bytes = b""
 
@@ -667,7 +699,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     data=transformed_bytes,
                     raw_data=raw_bytes,
                 )
-            else:  # segmentation
+            else:  # segmentation/reconstruction
                 sample_response = pb2.SampleRequestResponse(
                     sample_id=sid,
                     label=-1, 
