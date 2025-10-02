@@ -1,45 +1,138 @@
 # WeightsLab UI
-This is WeightsLab, an UI designed to allow AI practitioners to have better
-control over the training process of Deep Neural Networks training.
 
-This is an early prototype of a solution that aims to DEBUG and FIX potential
-problems that occurs during training:
-* overfitting
-* plauteous
-* minority class misses
-* problematic data samples analysis
-* data set slicing
-* weights manipulation (freezing, reinitialisation)
+WeightsLab is a powerful tool for editing and inspecting AI model weights during training.
+This early prototype helps you debug and fix common training issues through interactive weight manipulation and granular analysis.
 
-Since the paradigm is about granular statistics and interactivity, this allows
-for very useful and interesting flows to be performed:
-* model minimization
-* data set curation
-* root cause analysis
-* reduction in non-determinism
+## What Problems Does It Solve?
+WeightsLab addresses critical training challenges:
+
+* Overfitting and training plateaus
+* Dataset insights and optimization
+* Over/Under parameterization
+
+## Key Capabilities
+The granular statistics and interactive paradigm enables powerful workflows:
+
+* Monitor granular insights on data samples and weights parameters
+* Discard low quality samples by click or query
+* Create slices of data and discard them during training
+* Iterative pruning or growing of the architectures by click or query
+
+## Getting Started
+### Installation
+
+Clone and install the framework:
+
+```
+git clone https://github.com/GrayboxTech/weightslab.git
+cd weightslab
+pip install -e .
+```
+
+Clone the UI repository:
+```
+git clone git@github.com:GrayboxTech/weightslab_ui.git
+cd weightslab_ui
+```
+
+Compile RPC messages:
+```
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. experiment_service.proto
+```
+
+## Running WeightsLab
+
+### Define your experiment
+
+```
+# your_custom_exp.py
+
+import torch as th
+import torch.nn as nn
+import torch.optim as optim
+from torch.nn import functional as F
+
+from torchvision import transforms as T
+from torch.utils.data import Dataset
+
+from weightslab.experiment import Experiment
+from weightslab.model_with_ops import NetworkWithOps, DepType
+from weightslab.modules_with_ops import *
+from weightslab.tracking import TrackingMode
 
 
-## Steps needed to get started
-- [ ] Download the framework repo:
-```git clone https://github.com/GrayboxTech/weightslab.git``
-- [ ] Install the framework:
-```pip install -e .```
-- [ ] Download the UI repo(this repo):
-```git@github.com:GrayboxTech/weightslab_ui.git```
-- [ ] Compile rpc messages:
-```python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. experiment_service.proto```
-- [ ] Start the trainer process:
-```python trainer_worker.py```
-- [ ] Launch UI monitoring process:
-```python weights_lab.py --root_directory=PATH_TO_ROOT_DIRECTORY_OF_EXPERIMENT```
-- [ ] Open the link from terminal:
-``` Dash is running on http://127.0.0.1:8050/ ```
+class Model(NetworkWithOps, nn.Module):
+    def __init__(self, ...):
+        super().__init__()
+        self.tracking_mode = TrackingMode.DISABLED
+
+        self.conv1 = Conv2dWithNeuronOps(1, 128, kernel_size=3, padding=1)
+        self.bnrm1 = BatchNorm2dWithNeuronOps(128)
+        ...
+
+        self.define_deps()
+
+    def children(self):
+        return [self.conv1, self.bnrm1,]
+
+    def define_deps(self):
+        self.register_dependencies([
+            (self.conv1, self.bnrm1, DepType.SAME),
+            (self.bnrm1,   ... , DepType.INCOMING),
+            ...
+        ])
+        self.flatten_conv_id = ...
+
+    def forward(self, x, intermediary_outputs=None):
+        self.maybe_update_age(x)
+        ...
+
+class CustomOrStandard(Dataset):
+    def __init__(self, folders, image_size=None):
+        ...
+
+    def __len__(self):
+        ...
+
+    def __getitem__(self, idx):
+        ...
 
 
-### Initial page
-![Screenshot of Image 1](screen-shots/hyper_and_plots.png)
+def get_exp():
+    device = th.device("cuda" if th.cuda.is_available() else "cpu")
+    model = Model(...)
+    train_dataset = CustomOrStandard(...)
+    eval_dataset = CustomOrStandard(...)
+    metrics = {"acc": BinaryAccuracy().to(device),} 
 
-### Short Demos
-![Short Demo 1](screen-shots/reinits.gif)
+    exp = Experiment(
+        model=model,
+        optimizer_class=optim.Adam,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        device=device,
+        learning_rate=1e-3,
+        batch_size=32,
+        training_steps_to_do=1000,
+        name="experiment0",
+        metrics=metrics,
+        root_log_dir="task1",
+        logger=Dash("task"),
+        criterion=nn.L1Loss(reduction="mean")
+    )
+    return exp
+```
 
-![Short Demo 2](screen-shots/data-model-manipulation.gif)
+
+### Start the trainer process:
+
+```
+python trainer_worker.py
+```
+
+## Launch the UI monitoring process:
+```
+python weights_lab.py --root_directory=PATH_TO_ROOT_DIRECTORY_OF_EXPERIMENT
+```
+
+### Open the provided URL (typically http://127.0.0.1:8050/)
