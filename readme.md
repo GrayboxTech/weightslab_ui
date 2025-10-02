@@ -48,17 +48,12 @@ python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. experiment_se
 # your_custom_exp.py
 
 import torch as th
-import torch.nn as nn
-import torch.optim as optim
-from torch.nn import functional as F
-
-from torchvision import transforms as T
-from torch.utils.data import Dataset
+...
 
 from weightslab.experiment import Experiment
-from weightslab.model_with_ops import NetworkWithOps, DepType
+from weightslab.model_with_ops import *
 from weightslab.modules_with_ops import *
-from weightslab.tracking import TrackingMode
+from weightslab.tracking import *
 
 
 class Model(NetworkWithOps, nn.Module):
@@ -116,13 +111,19 @@ def get_exp():
         training_steps_to_do=1000,
         name="experiment0",
         metrics=metrics,
-        root_log_dir="task1",
+        root_log_dir="task",
         logger=Dash("task"),
         criterion=nn.L1Loss(reduction="mean")
     )
     return exp
 ```
+### Load your experiment in the trainer_worker
+```
+...
 
+from your_custom_exp import get_exp
+...
+```
 
 ### Start the trainer process:
 
@@ -132,7 +133,7 @@ python trainer_worker.py
 
 ## Launch the UI monitoring process:
 ```
-python weights_lab.py --root_directory=PATH_TO_ROOT_DIRECTORY_OF_EXPERIMENT
+python weights_lab.py --root_directory=task
 ```
 
 ### Open the provided URL (typically http://127.0.0.1:8050/)
