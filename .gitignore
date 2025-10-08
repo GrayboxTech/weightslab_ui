@@ -23,3 +23,6 @@ root_experiment/*
 mnist\ (another copy)/*
 mnist\ (copy)/*
 requirements\ copy.txt
+readme_old.md
+test_seg/*
+vad/*
