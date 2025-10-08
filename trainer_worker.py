@@ -17,24 +17,12 @@ from torchvision import transforms
 from scope_timer import ScopeTimer
 import traceback
 
-# from fashion_mnist_exp import get_exp
-
-# from hct_kaggle_exp import get_exp
-# from cifar_exp import get_exp
-# from imagenet_exp import get_exp
-# from imagenet_exp_deep import get_exp
-# from imagenet_convnext import get_exp
-# from mnist_exp_fully_conv import get_exp
-# from imagenet_effnet_exp import get_exp
-# from segmentation_exp import get_exp
-# from cad_models_exp import get_exp
+from fashion_mnist_exp import get_exp
 
 # from vad_exp import get_exp
-# from vad_unet_exp import get_exp
-from vad_unet_recon import get_exp
+# from segmentation_exp import get_exp
 
 experiment = get_exp()
-# experiment.set_is_training(True)
 
 
 def training_thread_callback():
@@ -184,7 +172,7 @@ def mask_to_png_bytes(mask, num_classes=21):
     return buf.getvalue()
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
-    # print("[BACKEND].get_data_set_representation")
+    print("[BACKEND].get_data_set_representation")
 
     sample_stats = pb2.SampleStatistics()
     sample_stats.sample_count = len(dataset.wrapped_dataset)
@@ -251,7 +239,7 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
             sample_discarded=bool(row.get('deny_listed', False)),
         )
         sample_stats.records.append(record)
-
+    print("[BACKEND].get_data_set_representation done: ", sample_stats)
     return sample_stats
 
 def _maybe_denorm(img_t, mean=None, std=None):
@@ -459,7 +447,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             yield training_status
 
     def ExperimentCommand(self, request, context):
-        # print("ExperimentServiceServicer.ExperimentCommand", request)
+        print("ExperimentServiceServicer.ExperimentCommand", request)
         if request.HasField('hyper_parameter_change'):
             # TODO(rotaru): handle this request
             hyper_parameters = request.hyper_parameter_change.hyper_parameters
@@ -596,75 +584,9 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
         return response
 
-    # def GetSamples(self, request, context):
-    #     dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
-    #     response = pb2.BatchSampleResponse()
-
-    #     do_resize = request.HasField("resize_width") and request.HasField("resize_height")
-    #     resize_dims = (request.resize_width, request.resize_height) if do_resize else None
-    #     task_type = getattr(dataset, "task_type", getattr(experiment, "task_type", "classification"))
-
-    #     samples_packaging_timer = ScopeTimer("samples_packaging")
-    #     for sid in request.sample_ids:
-    #         samples_packaging_timer.start()
-    #         try:
-    #             if hasattr(dataset, "_getitem_raw"):
-    #                 tensor, idx, label = dataset._getitem_raw(sid)
-    #             else:
-    #                 tensor, idx, label = dataset[sid]
-
-    #             if isinstance(tensor, torch.Tensor):
-    #                 img = tensor.detach().cpu()
-    #             else:
-    #                 img = torch.tensor(tensor)
-    #             if img.ndim == 3:
-    #                 pil_img = transforms.ToPILImage()(img)
-    #             elif img.ndim == 2:
-    #                 pil_img = Image.fromarray((img.numpy() * 255).astype(np.uint8))
-    #             else:
-    #                 raise ValueError("Unknown image shape.")
-
-    #             if resize_dims:
-    #                 pil_img = pil_img.resize(resize_dims, Image.BILINEAR)
-    #             buf = io.BytesIO()
-    #             pil_img.save(buf, format='PNG')
-    #             transformed_bytes = buf.getvalue()
-
-    #             try:
-    #                 raw = load_raw_image(dataset, sid)
-    #                 if resize_dims:
-    #                     raw = raw.resize(resize_dims, Image.BILINEAR)
-    #                 raw_buf = io.BytesIO()
-    #                 raw.save(raw_buf, format='PNG')
-    #                 raw_bytes = raw_buf.getvalue()
-    #             except Exception:
-    #                 raw_bytes = transformed_bytes 
-
-    #             mask_bytes = b""
-    #             pred_bytes = b""
-
-    #             if task_type == "segmentation":
-    #                 mask_bytes = mask_to_png_bytes(label)
-    #                 pred_mask = dataset.get_prediction_mask(sid)
-    #                 pred_bytes = mask_to_png_bytes(pred_mask)
-
-
-    #             sample_response = pb2.SampleRequestResponse(
-    #                 sample_id=sid,
-    #                 label=int(label) if task_type == "classification" else -1,  # not used for segmentation
-    #                 data=transformed_bytes,
-    #                 raw_data=raw_bytes,
-    #                 mask=mask_bytes,
-    #                 prediction=pred_bytes,
-    #             )
-    #             response.samples.append(sample_response)
-    #         except Exception as e:
-    #             print(f"[Error] GetSamples({sid}) failed: {e}")
-    #         samples_packaging_timer.stop()
-    #     print(samples_packaging_timer)
-    #     return response
-
     def GetSamples(self, request, context):
+        print(f"ExperimentServiceServicer.GetSamples({request})")
+
         import concurrent.futures
 
         dataset = experiment.train_loader.dataset if request.origin == "train" else experiment.eval_loader.dataset
@@ -763,7 +685,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     neuron_id.neuron_id)
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
                 experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.FREEZE,
+                    op_type=ArchitectureOpType.FREEZE,
                     layer_id=layer_id,
                     neuron_ids=neuron_ids)
             answer = pb2.WeightsOperationResponse(
