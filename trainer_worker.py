@@ -171,64 +171,49 @@ def mask_to_png_bytes(mask, num_classes=21):
     im.save(buf, format="PNG")
     return buf.getvalue()
 
+def _class_ids(x, num_classes=None, ignore_index=255):
+    if x is None:
+        return []
+    if hasattr(x, "detach"): 
+        x = x.detach().cpu().numpy()
+    else:
+        x = np.asarray(x)
+    x = np.squeeze(x)
+    if x.ndim != 2:
+        return []
+    u = np.unique(x.astype(np.int64))
+    u = u[u != int(ignore_index)]
+    if num_classes is not None:
+        u = u[(u >= 0) & (u < int(num_classes))]
+    return [int(v) for v in u.tolist()]
+
+def _to_scalar_id(x):
+    if hasattr(x, "detach"):  # torch.Tensor
+        x = x.detach().cpu().numpy()
+    x = np.asarray(x)
+    if x.size == 1:
+        return [int(x.item())]
+    return []
+
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     print("[BACKEND].get_data_set_representation")
-
     sample_stats = pb2.SampleStatistics()
     sample_stats.sample_count = len(dataset.wrapped_dataset)
 
-    task_type = getattr(experiment, "task_type", getattr(dataset, "task_type", "classification"))
+    task_type = getattr(experiment, "task_type", "classification")
     sample_stats.task_type = task_type
 
     ignore_index = getattr(dataset, "ignore_index", 255)
-    num_classes = getattr(dataset, "num_classes", getattr(experiment, "num_classes", None))
+    num_classes  = getattr(dataset, "num_classes", None)
 
     for sample_id, row in enumerate(dataset.as_records()):
-        target_list, pred_list = [], []
-
         if task_type == "segmentation":
-            # target: unique classes from the actual 2D mask
-            try:
-                _, _, label = dataset._getitem_raw(sample_id)
-                arr = label.detach().cpu().numpy() if isinstance(label, torch.Tensor) else np.asarray(label)
-                if arr.ndim == 2:
-                    u = np.unique(arr.astype(np.int64))
-                    u = u[u != int(ignore_index)]
-                    if num_classes is not None:
-                        u = u[(u >= 0) & (u < int(num_classes))]
-                    target_list = [int(v) for v in u.tolist()]
-            except Exception:
-                pass
-
-            # prediction: unique classes from stored pred mask (if any)
-            pred = row.get("prediction_raw", None)
-            try:
-                arr = pred.detach().cpu().numpy() if isinstance(pred, torch.Tensor) else np.asarray(pred)
-                if arr.ndim == 2:
-                    u = np.unique(arr.astype(np.int64))
-                    u = u[u != int(ignore_index)]
-                    if num_classes is not None:
-                        u = u[(u >= 0) & (u < int(num_classes))]
-                    pred_list = [int(v) for v in u.tolist()]
-            except Exception:
-                pass
-
+            _, _, label = dataset._getitem_raw(sample_id)
+            target_list = _class_ids(label, num_classes, ignore_index)
+            pred_list   = _class_ids(row.get("prediction_raw"), num_classes, ignore_index)
         else:
-            tgt = row.get("label", row.get("target", -1))
-            try:
-                tarr = tgt.detach().cpu().numpy() if isinstance(tgt, torch.Tensor) else np.asarray(tgt)
-                if tarr.size == 1: 
-                    target_list = [int(tarr.reshape(-1)[0])]
-            except Exception:
-                pass
-
-            pred = row.get("prediction_raw", -1)
-            try:
-                parr = pred.detach().cpu().numpy() if isinstance(pred, torch.Tensor) else np.asarray(pred)
-                if parr.size == 1: 
-                    pred_list = [int(parr.reshape(-1)[0])]
-            except Exception:
-                pass
+            target_list = _to_scalar_id(row.get("label", row.get("target", -1)))
+            pred_list   = _to_scalar_id(row.get("prediction_raw", -1))
 
         record = pb2.RecordMetadata(
             sample_id=row.get('sample_id', sample_id),
@@ -239,7 +224,7 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
             sample_discarded=bool(row.get('deny_listed', False)),
         )
         sample_stats.records.append(record)
-    print("[BACKEND].get_data_set_representation done: ", sample_stats)
+    # print("[BACKEND].get_data_set_representation done: ", sample_stats)
     return sample_stats
 
 def _maybe_denorm(img_t, mean=None, std=None):
