@@ -187,14 +187,6 @@ def _class_ids(x, num_classes=None, ignore_index=255):
         u = u[(u >= 0) & (u < int(num_classes))]
     return [int(v) for v in u.tolist()]
 
-def _to_scalar_id(x):
-    if hasattr(x, "detach"):  # torch.Tensor
-        x = x.detach().cpu().numpy()
-    x = np.asarray(x)
-    if x.size == 1:
-        return [int(x.item())]
-    return []
-
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     print("[BACKEND].get_data_set_representation")
     sample_stats = pb2.SampleStatistics()
@@ -212,8 +204,10 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
             target_list = _class_ids(label, num_classes, ignore_index)
             pred_list   = _class_ids(row.get("prediction_raw"), num_classes, ignore_index)
         else:
-            target_list = _to_scalar_id(row.get("label", row.get("target", -1)))
-            pred_list   = _to_scalar_id(row.get("prediction_raw", -1))
+            target = row.get("label", row.get("target", -1))
+            pred = row.get("prediction_raw", -1)
+            target_list = [int(target)] if not isinstance(target, (list, np.ndarray)) else [int(np.array(target).item())]
+            pred_list = [int(pred)] if not isinstance(pred, (list, np.ndarray)) else [int(np.array(pred).item())]
 
         record = pb2.RecordMetadata(
             sample_id=row.get('sample_id', sample_id),
