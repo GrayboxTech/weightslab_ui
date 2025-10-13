@@ -17,8 +17,8 @@ from torchvision import transforms
 from scope_timer import ScopeTimer
 import traceback
 
-from fashion_mnist_exp import get_exp
-
+# from fashion_mnist_exp import get_exp
+from vad_unet_multi import get_exp
 # from vad_exp import get_exp
 # from segmentation_exp import get_exp
 
@@ -138,14 +138,14 @@ def get_layer_representations(model):
 def make_task_field(name, value):
     if isinstance(value, float):
         return pb2.TaskField(name=name, float_value=value)
+    elif isinstance(value, bool):
+        return pb2.TaskField(name=name, bool_value=value)
     elif isinstance(value, int):
         return pb2.TaskField(name=name, int_value=value)
     elif isinstance(value, str):
         return pb2.TaskField(name=name, string_value=value)
     elif isinstance(value, bytes):
         return pb2.TaskField(name=name, bytes_value=value)
-    elif isinstance(value, bool):
-        return pb2.TaskField(name=name, bool_value=value)
     else:
         raise ValueError(f"Unsupported value type for TaskField: {name}: {type(value)}")
 
@@ -188,35 +188,55 @@ def _class_ids(x, num_classes=None, ignore_index=255):
     return [int(v) for v in u.tolist()]
 
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
-    print("[BACKEND].get_data_set_representation")
     sample_stats = pb2.SampleStatistics()
     sample_stats.sample_count = len(dataset.wrapped_dataset)
 
-    task_type = getattr(experiment, "task_type", "classification")
-    sample_stats.task_type = task_type
+    tasks = getattr(experiment, "tasks", None)
+    is_multi_task = bool(tasks) and len(tasks) > 1
+    sample_stats.task_type = "multi-task" if is_multi_task else getattr(
+        experiment, "task_type", getattr(dataset, "task_type", "classification")
+    )
 
     ignore_index = getattr(dataset, "ignore_index", 255)
-    num_classes  = getattr(dataset, "num_classes", None)
+    num_classes  = getattr(dataset, "num_classes", getattr(experiment, "num_classes", None))
 
     for sample_id, row in enumerate(dataset.as_records()):
-        if task_type == "segmentation":
-            _, _, label = dataset._getitem_raw(sample_id)
-            target_list = _class_ids(label, num_classes, ignore_index)
-            pred_list   = _class_ids(row.get("prediction_raw"), num_classes, ignore_index)
-        else:
-            target = row.get("label", row.get("target", -1))
-            pred = row.get("prediction_raw", -1)
-            target_list = [int(target)] if not isinstance(target, (list, np.ndarray)) else [int(np.array(target).item())]
-            pred_list = [int(pred)] if not isinstance(pred, (list, np.ndarray)) else [int(np.array(pred).item())]
-
         record = pb2.RecordMetadata(
             sample_id=row.get('sample_id', sample_id),
-            sample_label=target_list,
-            sample_prediction=pred_list,
             sample_last_loss=float(row.get('prediction_loss', -1)),
             sample_encounters=int(row.get('encountered', row.get('exposure_amount', 0))),
             sample_discarded=bool(row.get('deny_listed', False)),
+            task_type=sample_stats.task_type,
         )
+
+        if is_multi_task:
+            preview_attached = False
+            for t in tasks:
+                loss_key, pred_key = f"loss/{t.name}", f"pred/{t.name}"
+                if loss_key in row:
+                    record.extra_fields.append(make_task_field(loss_key, float(np.array(row[loss_key]).reshape(-1)[0])))
+                if pred_key in row:
+                    arr = np.array(row[pred_key].detach().cpu() if hasattr(row[pred_key], "detach") else row[pred_key])
+                    if arr.ndim >= 2 and not preview_attached:
+                        record.prediction_raw = tensor_to_bytes(row[pred_key])
+                        preview_attached = True
+                    elif arr.size == 1:
+                        record.extra_fields.append(make_task_field(pred_key, float(arr.reshape(-1)[0])))
+
+        else:
+            task_type = sample_stats.task_type
+            if task_type == "segmentation":
+                _, _, label = dataset._getitem_raw(sample_id)
+                target_list = _class_ids(label, num_classes, ignore_index)
+                pred_list   = _class_ids(row.get("prediction_raw"), num_classes, ignore_index)
+            else:
+                target = row.get("label", row.get("target", -1))
+                pred   = row.get("prediction_raw", -1)
+                target_list = [int(target)] if not isinstance(target, (list, np.ndarray)) else [int(np.array(target).item())]
+                pred_list   = [int(pred)]   if not isinstance(pred, (list, np.ndarray))   else [int(np.array(pred).item())]
+            record.sample_label.extend(target_list)
+            record.sample_prediction.extend(pred_list)
+
         sample_stats.records.append(record)
     # print("[BACKEND].get_data_set_representation done: ", sample_stats)
     return sample_stats
@@ -339,7 +359,12 @@ def process_sample(sid, dataset, do_resize, resize_dims):
         except Exception:
             raw_bytes = transformed_bytes 
 
+        tasks = getattr(experiment, "tasks", None)
+        is_multi_task = bool(tasks) and len(tasks) > 1
+
         task_type = getattr(experiment, "task_type", getattr(dataset, "task_type", "classification"))
+        if is_multi_task:
+            task_type = "multi-task"
 
         cls_label = -1
         mask_bytes = b""
@@ -373,6 +398,25 @@ def process_sample(sid, dataset, do_resize, resize_dims):
             try:
                 if hasattr(dataset, "get_prediction_mask"):
                     recon = dataset.get_prediction_mask(sid)
+                    if recon is not None:
+                        r = recon.detach().cpu() if isinstance(recon, torch.Tensor) else torch.tensor(recon)
+                        if r.ndim == 2:
+                            r = r.unsqueeze(0)
+                        pred_bytes = tensor_to_bytes(r) 
+            except Exception:
+                pred_bytes = b""
+
+        elif task_type == "multi-task":
+            if isinstance(label, (list, np.ndarray)):
+                cls_label = int(np.array(label).item())
+            elif hasattr(label, 'cpu'):
+                cls_label = int(np.array(label.cpu()).item())
+            else:
+                cls_label = int(label)
+
+            try:
+                if hasattr(dataset, "get_prediction_mask"):
+                    recon = dataset.get_prediction_mask(sid)  # stores latest dense pred; used here for recon preview
                     if recon is not None:
                         r = recon.detach().cpu() if isinstance(recon, torch.Tensor) else torch.tensor(recon)
                         if r.ndim == 2:
@@ -426,7 +470,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             yield training_status
 
     def ExperimentCommand(self, request, context):
-        print("ExperimentServiceServicer.ExperimentCommand", request)
+        # print("ExperimentServiceServicer.ExperimentCommand", request)
         if request.HasField('hyper_parameter_change'):
             # TODO(rotaru): handle this request
             hyper_parameters = request.hyper_parameter_change.hyper_parameters
@@ -593,22 +637,24 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             if transformed_bytes is None or raw_bytes is None:
                 continue
 
-            if task_type == "classification":
-                sample_response = pb2.SampleRequestResponse(
-                    sample_id=sid,
-                    label=cls_label,
-                    data=transformed_bytes,
-                    raw_data=raw_bytes,
-                )
-            else:  # segmentation/reconstruction
+            if pred_bytes and len(pred_bytes) > 0:
                 sample_response = pb2.SampleRequestResponse(
                     sample_id=sid,
                     label=-1, 
                     data=transformed_bytes,  
                     raw_data=raw_bytes,      
-                    mask=mask_bytes,        
+                    mask=b"",  # Empty for reconstruction        
                     prediction=pred_bytes,   
                 )
+            else:
+                sample_response = pb2.SampleRequestResponse(
+                    sample_id=sid,
+                    label=cls_label,
+                    data=transformed_bytes,
+                    raw_data=raw_bytes,
+                    mask=b"",
+                    prediction=b"",
+                )     
             response.samples.append(sample_response)
 
         return response

@@ -1599,17 +1599,35 @@ def sample_statistics_to_data_records(
         data_records.append(data_record)
     return data_records
 
-
-def get_data_tab(ui_state: UIState):
+def _build_table_columns(df: pd.DataFrame) -> list[dict]:
+    base = [c for c in _DISPLAY_COLUMNS if c in df.columns]
+    extra = sorted([c for c in df.columns if c not in base and c not in {"Encounters", "Discarded"}])
     cols = []
-    for column in _DISPLAY_COLUMNS:
-        spec = {"name": column, "id": column,
-                "type": "text" if column == "Discarded" else 'any'}
-        if column == "LastLoss":
+    
+    for col in base + extra:
+        spec = {"name": col, "id": col}
+        if col == "LastLoss":
             spec["type"] = "numeric"
             spec["format"] = Format(precision=2, scheme=Scheme.fixed)
+        elif col.startswith('pred/'):  # Multi-task prediction columns
+            spec["type"] = "numeric"
+            spec["format"] = Format(precision=0, scheme=Scheme.fixed)
+        else:
+            dtype = df[col].dtype if col in df.columns else None
+            if pd.api.types.is_float_dtype(dtype):
+                spec["type"] = "numeric"
+                spec["format"] = Format(precision=4, scheme=Scheme.fixed)
+            elif pd.api.types.is_integer_dtype(dtype):
+                spec["type"] = "numeric"
+                spec["format"] = Format(precision=0, scheme=Scheme.fixed)
+            else:
+                spec["type"] = "any"
         cols.append(spec)
+    return cols
 
+def get_data_tab(ui_state: UIState):
+    train_cols = _build_table_columns(ui_state.samples_df)
+    eval_cols  = _build_table_columns(ui_state.eval_samples_df)
     grid_preset_dropdown = dcc.Dropdown(
         id='grid-preset-dropdown',
         options=[
@@ -1631,7 +1649,7 @@ def get_data_tab(ui_state: UIState):
     train_table = dash_table.DataTable(
         id='train-data-table',
         data=ui_state.samples_df.to_dict('records'),
-        columns=cols,
+        columns=train_cols,
         sort_action="native",
         page_action="native",
         page_size=16,
@@ -1653,7 +1671,7 @@ def get_data_tab(ui_state: UIState):
     eval_table = dash_table.DataTable(
         id='eval-data-table',
         data=ui_state.eval_samples_df.to_dict('records'),
-        columns=cols,
+        columns=eval_cols,
         sort_action="native",
         page_action="native",
         page_size=16,
@@ -1882,12 +1900,67 @@ def label_below_img(img_component, last_loss, img_size):
     ], style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'center', 'width': f'{img_size}px'})
 
 
-def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_selected, img_size, is_discarded, sid=None, last_loss=None):
-    input_img_div = html.Div([
-        html.Img(
-            src=f'data:image/png;base64,{input_b64}',
-            style={'width':f'{img_size}px','border':'1px solid #888'}
-        ),
+def render_unified_triplet(sample, sample_row, task_type, is_selected, img_size, is_discarded, sid=None, last_loss=None):
+    """Unified triplet display for both segmentation and reconstruction"""
+    
+    if task_type == "segmentation":
+        left_label, left_border = "Input", "#888"
+        middle_label, middle_border = "Target", "green" 
+        right_label, right_border = "Prediction", "blue"
+        
+        left_b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+        middle_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
+        right_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
+        
+    else:  # reconstruction
+        left_label, left_border = "Input", "#888"
+        middle_label, middle_border = "Target", "green"
+        right_label, right_border = "Reconstruction", "blue"
+        
+        left_b64 = base64.b64encode(sample.raw_data).decode('utf-8')
+        middle_b64 = base64.b64encode(sample.raw_data).decode('utf-8')  # Target ≈ Input for reconstruction
+        right_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
+    
+    def img_component(src_b64, label, border_color):
+        if src_b64:
+            return html.Div([
+                html.Img(
+                    src=f'data:image/png;base64,{src_b64}',
+                    width=img_size,
+                    height=img_size,
+                    style={
+                        'width': f'{img_size}px', 
+                        'height': f'{img_size}px', 
+                        'border': f'2px solid {border_color}',
+                        'contentVisibility': 'auto'
+                    }
+                ),
+                html.Div(label, style={'fontSize': 10, 'textAlign': 'center', 'marginTop': '2px'})
+            ])
+        else:
+            return html.Div([
+                html.Div("No data", style={
+                    'width': f'{img_size}px', 'height': f'{img_size}px',
+                    'border': f'2px dashed {border_color}', 'display': 'flex',
+                    'alignItems': 'center', 'justifyContent': 'center',
+                    'fontSize': '9px', 'color': '#666'
+                }),
+                html.Div(label, style={'fontSize': 10, 'textAlign': 'center', 'marginTop': '2px'})
+            ])
+    
+    # Get classification info if available (for multi-task)
+    cls_info = None
+    if sample_row is not None:
+        target = sample_row.get('Target', '?')
+        prediction = sample_row.get('Prediction', '?')
+        if isinstance(target, list) and len(target) > 0:
+            target = target[0]
+        if isinstance(prediction, list) and len(prediction) > 0:
+            prediction = prediction[0]
+        cls_info = f"Cls: T{target}/P{prediction}"
+    
+    return html.Div([
+        # Metadata overlays
         html.Div(
             f"ID: {sid}", style={
                 'position': 'absolute', 'top': '2px', 'left': '4px',
@@ -1903,27 +1976,39 @@ def render_segmentation_triplet(input_b64, gt_mask_b64, pred_mask_b64, is_select
                 'fontSize': '10px', 'padding': '1px 5px', 'borderRadius': '3px'
             }
         ) if last_loss is not None else None,
-        html.Div("Input", style={'fontSize':10, 'textAlign':'center'})
-    ], style={'position': 'relative', 'display': 'inline-block', 'width': f'{img_size}px', 'height': f'{img_size}px'})
-    
-    return html.Div([
-        input_img_div,
+        
+        # Classification info for multi-task
+        html.Div(
+            cls_info, style={
+                'position': 'absolute', 'bottom': '2px', 'left': '4px',
+                'background': 'rgba(255,255,255,0.9)', 'color': 'black',
+                'fontSize': '9px', 'padding': '1px 4px', 'borderRadius': '3px'
+            }
+        ) if cls_info else None,
+        
+        # Task type badge
+        html.Div(
+            task_type, style={
+                'position': 'absolute', 'bottom': '2px', 'right': '4px', 
+                'background': 'rgba(0,0,0,0.7)', 'color': 'white',
+                'fontSize': '8px', 'padding': '1px 4px', 'borderRadius': '3px',
+                'textTransform': 'uppercase'
+            }
+        ),
+        
+        # Images
         html.Div([
-            html.Img(src=f'data:image/png;base64,{gt_mask_b64}', style={'width':f'{img_size}px','border':'1px solid green'}),
-            html.Div("Target", style={'fontSize':10, 'textAlign':'center'})
-        ]),
-        html.Div([
-            html.Img(src=f'data:image/png;base64,{pred_mask_b64}', style={'width':f'{img_size}px','border':'1px solid blue'}),
-            html.Div("Prediction", style={'fontSize':10, 'textAlign':'center'})
-        ]),
+            img_component(left_b64, left_label, left_border),
+            img_component(middle_b64, middle_label, middle_border),
+            img_component(right_b64, right_label, right_border)
+        ], style={'display': 'flex', 'flexDirection': 'row', 'gap': '4px'})
+        
     ], style={
-        'display':'flex', 
-        'flexDirection':'row', 
-        'gap':'4px', 
-        'marginBottom':'8px', 
+        'position': 'relative',
+        'marginBottom': '8px',
         'border': '4px solid red' if is_selected else 'none',
         'transition': 'border 0.3s, opacity 0.3s',
-        'opacity': 0.25 if is_discarded else 1.0  
+        'opacity': 0.25 if is_discarded else 1.0
     })
 
 def render_images(ui_state: UIState, stub, sample_ids, origin,
@@ -1981,78 +2066,31 @@ def render_images(ui_state: UIState, stub, sample_ids, origin,
                 )
                 imgs.append(clickable)
 
-        else:
-            # Segmentation: still fetch mask/pred once; render with fixed dims
-            with ScopeTimer('getSamples grpc call') as grpc_call:
-                batch_response = stub.GetSamples(pb2.BatchSampleRequest(
-                    sample_ids=sample_ids,
-                    origin=origin,
-                    resize_width=img_size,
-                    resize_height=img_size
-                ))
-            print(grpc_call)
+        else:  
+            # Unified triplet for both segmentation and reconstruction
+            batch_response = stub.GetSamples(pb2.BatchSampleRequest(
+                sample_ids=sample_ids,
+                origin=origin,
+                resize_width=img_size,
+                resize_height=img_size
+            ))
 
             for sample in batch_response.samples:
                 sid = int(sample.sample_id)
                 is_discarded = sid in discarded_ids
                 last_loss = id_to_loss.get(sid, None)
-
-                input_b64 = base64.b64encode(sample.raw_data).decode('utf-8')
-                gt_mask_b64 = base64.b64encode(sample.mask).decode('utf-8') if sample.mask else ""
-                pred_mask_b64 = base64.b64encode(sample.prediction).decode('utf-8') if sample.prediction else ""
-
-                def png_img(src_b64, border):
-                    return html.Img(
-                        src=f'data:image/png;base64,{src_b64}',
-                        width=img_size,
-                        height=img_size,
-                        style={'width': f'{img_size}px', 'height': f'{img_size}px', 'border': border,
-                                'contentVisibility': 'auto', 'containIntrinsicSize': f'{img_size}px {img_size}px'}
-                    )
-
-                input_img_div = html.Div([
-                    html.Img(
-                        src=f'data:image/png;base64,{input_b64}',
-                        width=img_size,
-                        height=img_size,
-                        style={'width': f'{img_size}px', 'height': f'{img_size}px', 'border': '1px solid #888',
-                                'contentVisibility': 'auto', 'containIntrinsicSize': f'{img_size}px {img_size}px'}
-                    ),
-                    html.Div(
-                        f"ID: {sid}", style={
-                            'position': 'absolute', 'top': '2px', 'left': '4px',
-                            'background': 'rgba(0,0,0,0.55)', 'color': 'white',
-                            'fontSize': '10px', 'padding': '1px 5px', 'borderRadius': '3px'
-                        }
-                    ),
-                    html.Div(
-                        f"Loss: {last_loss:.4f}" if last_loss is not None else "Loss: -",
-                        style={
-                            'position': 'absolute', 'top': '2px', 'right': '4px',
-                            'background': 'rgba(0,0,0,0.55)', 'color': 'white',
-                            'fontSize': '10px', 'padding': '1px 5px', 'borderRadius': '3px'
-                        }
-                    ),
-                    html.Div("Input", style={'fontSize': 10, 'textAlign': 'center'})
-                ], style={'position': 'relative', 'display': 'inline-block',
-                            'width': f'{img_size}px', 'height': f'{img_size}px'})
-
-                triplet = html.Div([
-                    input_img_div,
-                    html.Div([png_img(gt_mask_b64, '1px solid green'),
-                                html.Div("Target", style={'fontSize': 10, 'textAlign': 'center'})]),
-                    html.Div([png_img(pred_mask_b64, '1px solid blue'),
-                                html.Div("Prediction", style={'fontSize': 10, 'textAlign': 'center'})]),
-                ], style={
-                    'display': 'flex',
-                    'flexDirection': 'row',
-                    'gap': '4px',
-                    'marginBottom': '8px',
-                    'border': '4px solid red' if sid in selected_ids else 'none',
-                    'transition': 'border 0.3s, opacity 0.3s',
-                    'opacity': 0.25 if is_discarded else 1.0
-                })
-
+                
+                df = ui_state.samples_df if origin == "train" else ui_state.eval_samples_df  
+                sample_row = df[df['SampleId'] == sid].iloc[0] if not df.empty else None
+                
+                task_type = "segmentation" if sample.mask else "reconstruction"
+                
+                triplet = render_unified_triplet(
+                    sample, sample_row, task_type, 
+                    sid in selected_ids, img_size, is_discarded, 
+                    sid, last_loss
+                )
+                
                 clickable = html.Div(
                     [triplet],
                     id={'type': 'sample-img', 'origin': origin, 'sid': sid},
@@ -3154,6 +3192,7 @@ def main():
 
     @app.callback(
         Output('train-data-table', 'data'),
+        Output('train-data-table', 'columns'),
         Output('train-dataset-header', 'children'),
         Input('datatbl-render-freq', 'n_intervals'),
         Input('run-train-data-query', 'n_clicks'),
@@ -3185,12 +3224,17 @@ def main():
 
         num_available_samples = (~df["Discarded"]).sum()
         selected_count = len(train_selected_ids or [])
-        return df.to_dict('records'), f"Train Dataset #{num_available_samples} samples | {selected_count} selected"
+        return (
+            df.to_dict('records'),
+            _build_table_columns(df),                  
+            f"Train Dataset #{num_available_samples} samples | {selected_count} selected"
+        )
 
 
 
     @app.callback(
         Output('eval-data-table', 'data'),
+        Output('eval-data-table', 'columns'),
         Output('eval-dataset-header', 'children'),
         Input('datatbl-render-freq', 'n_intervals'),
         Input('run-eval-data-query', 'n_clicks'),
@@ -3221,7 +3265,11 @@ def main():
 
         num_available_samples = (~df["Discarded"]).sum()
         selected_count = len(eval_selected_ids or [])
-        return df.to_dict('records'), f"Eval Dataset #{num_available_samples} samples | {selected_count} selected"
+        return (
+            df.to_dict('records'),
+            _build_table_columns(df),
+            f"Eval Dataset #{num_available_samples} samples | {selected_count} selected"
+        )
 
     @app.callback(
         Output('train-sample-panel', 'children', allow_duplicate=True),
