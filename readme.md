@@ -20,36 +20,42 @@ The granular statistics and interactive paradigm enables powerful workflows:
 
 ## Getting Started
 ### Installation
+Define a python environment
+```bash
+python -m venv weightslab_venv
+./weightslab_venv/Scripts/activate.bat  # Ubuntu
+# ./weightslab_venv/Scripts/activate.ps1  # Windows
+```
+or install and use conda.
+
 
 Clone and install the framework:
 
-```
+```bash
 git clone https://github.com/GrayboxTech/weightslab.git
 cd weightslab
 pip install -e .
 ```
 
 Clone the UI repository:
-```
+```bash
 git clone git@github.com:GrayboxTech/weightslab_ui.git
 cd weightslab_ui
+pip install -r ./requirements.txt
 ```
 
 Compile RPC messages:
-```
+```bash
 python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. experiment_service.proto
 ```
 
+
 ## Running WeightsLab
-
 ### Define your experiment
-
-```
+```python
 # your_custom_exp.py
-
 import torch as th
-...
-
+# ...
 from weightslab.experiment import Experiment
 from weightslab.model_with_ops import *
 from weightslab.modules_with_ops import *
@@ -117,23 +123,24 @@ def get_exp():
     )
     return exp
 ```
-### Load your experiment in the trainer_worker
-```
-...
 
+### Load your experiment in the trainer_worker
+```python
+# ...
 from your_custom_exp import get_exp
-...
+# ...
 ```
 
 ### Start the trainer process:
 
-```
+```bash
 python trainer_worker.py
 ```
 
 ## Launch the UI monitoring process:
-```
+```bash
 python weights_lab.py --root_directory=task
 ```
 
-### Open the provided URL (typically http://127.0.0.1:8050/)
+### Open the provided URL
+Typically http://127.0.0.1:8050/
