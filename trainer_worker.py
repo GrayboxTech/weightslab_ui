@@ -187,6 +187,18 @@ def _class_ids(x, num_classes=None, ignore_index=255):
         u = u[(u >= 0) & (u < int(num_classes))]
     return [int(v) for v in u.tolist()]
 
+def _labels_from_mask_path_histogram(path, num_classes=None, ignore_index=255):
+    with Image.open(path) as im:
+        if im.mode not in ("P", "L"):
+            im = im.convert("L")
+        hist = im.histogram()  # length 256
+    ub = 256 if num_classes is None else int(num_classes)
+    ids = [i for i, cnt in enumerate(hist[:ub]) if cnt > 0]
+    if ignore_index is not None:
+        ig = int(ignore_index)
+        ids = [i for i in ids if i != ig]
+    return ids
+
 def get_data_set_representation(dataset) -> pb2.SampleStatistics:
     sample_stats = pb2.SampleStatistics()
     sample_stats.sample_count = len(dataset.wrapped_dataset)
@@ -226,9 +238,12 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
         else:
             task_type = sample_stats.task_type
             if task_type == "segmentation":
-                _, _, label = dataset._getitem_raw(sample_id)
-                target_list = _class_ids(label, num_classes, ignore_index)
-                pred_list   = _class_ids(row.get("prediction_raw"), num_classes, ignore_index)
+                label = row.get("target")
+                if isinstance(label, str):
+                    target_list = _labels_from_mask_path_histogram(label, num_classes, ignore_index)
+                else:
+                    target_list = _class_ids(label, num_classes, ignore_index)
+                pred_list = _class_ids(row.get("prediction_raw"), num_classes, ignore_index)
             else:
                 target = row.get("label", row.get("target", -1))
                 pred   = row.get("prediction_raw", -1)
@@ -637,7 +652,16 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             if transformed_bytes is None or raw_bytes is None:
                 continue
 
-            if pred_bytes and len(pred_bytes) > 0:
+            if task_type == "segmentation":
+                sample_response = pb2.SampleRequestResponse(
+                    sample_id=sid,
+                    label=cls_label,
+                    data=transformed_bytes,
+                    raw_data=raw_bytes,
+                    mask=mask_bytes,           
+                    prediction=pred_bytes or b""  
+                )
+            elif pred_bytes and len(pred_bytes) > 0:
                 sample_response = pb2.SampleRequestResponse(
                     sample_id=sid,
                     label=-1, 
