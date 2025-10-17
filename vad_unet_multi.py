@@ -49,7 +49,6 @@ class UNetMulti(NetworkWithOps, nn.Module):
         self.up2_bn   = BatchNorm2dWithNeuronOps(C1)
 
         # ---- Heads ----
-        self.seg_feats   = Conv2dWithNeuronOps(C1, C1, kernel_size=1)   # shared feat
         self.classifier  = LinearWithNeuronOps(C1, 1)                   # classification
         self.recon_head  = Conv2dWithNeuronOps(C1, in_ch, kernel_size=1)  # reconstruction
 
@@ -63,7 +62,7 @@ class UNetMulti(NetworkWithOps, nn.Module):
             self.mid_conv7, self.mid_bn7,
             self.up1_conv, self.up1_bn,
             self.up2_conv, self.up2_bn,
-            self.seg_feats, self.classifier, self.recon_head
+            self.classifier, self.recon_head
         ]
 
     def define_deps(self):
@@ -160,8 +159,9 @@ def get_exp():
         criterion=nn.BCEWithLogitsLoss(reduction="none"),
         loss_weight=1.0,
         target_fn=lambda inp: inp.label_batch.float(),
-        metrics={"acc": BinaryAccuracy().to(device)}
+        metrics={"acc": BinaryAccuracy(threshold=0.5).to(device)}
     )
+    cls_task.infer_pred = lambda y: torch.sigmoid(y)
 
     recon_task = Task(
         name="recon",
@@ -170,6 +170,7 @@ def get_exp():
         loss_weight=0.3,
         target_fn=lambda inp: inp
     )
+    recon_task.infer_pred = lambda y: y
 
     exp = Experiment(
         model=model,
@@ -177,8 +178,8 @@ def get_exp():
         train_dataset=train_dataset,
         eval_dataset=val_dataset,
         device=device,
-        learning_rate=2e-4,
-        batch_size=64,
+        learning_rate=1e-3,
+        batch_size=8,
         training_steps_to_do=200000,
         name="vad_unet_multitask",
         root_log_dir="test_vad_unet_multitask",
