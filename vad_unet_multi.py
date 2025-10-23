@@ -20,8 +20,8 @@ class UNetMulti(NetworkWithOps, nn.Module):
     def __init__(self, in_ch: int = 3, base: int = 4, bottleneck: int = 32):
         super().__init__()
         self.tracking_mode = TrackingMode.DISABLED
-        C1, C2, C3 = base, base * 2, bottleneck
-
+        C1, C2, C3 = base, base, base  
+        
         # ---- Encoder ----
         self.enc1_conv = Conv2dWithNeuronOps(in_ch, C1, kernel_size=3, padding=1)
         self.enc1_bn   = BatchNorm2dWithNeuronOps(C1)
@@ -80,12 +80,18 @@ class UNetMulti(NetworkWithOps, nn.Module):
             (self.mid_conv5,  self.mid_bn5, DepType.SAME),
             (self.mid_bn5,    self.mid_conv7, DepType.INCOMING),
             (self.mid_conv7,  self.mid_bn7, DepType.SAME),
+            
+            (self.mid_bn7,    self.up1_conv, DepType.INCOMING),  # From bottleneck
+            (self.enc2_bn, self.up1_conv, DepType.INCOMING),     # Skip: e2 → u1 concat
 
-            (self.mid_bn7,    self.up1_conv, DepType.INCOMING),
             (self.up1_conv,   self.up1_bn, DepType.SAME),
-
-            (self.up1_bn,     self.up2_conv, DepType.INCOMING),
+            (self.up1_bn,     self.up2_conv, DepType.INCOMING),  # From decoder
+            (self.enc1_bn, self.up2_conv, DepType.INCOMING),     # Skip: e1 → u2 concat
+            
             (self.up2_conv,   self.up2_bn, DepType.SAME),
+
+            (self.up2_bn, self.classifier, DepType.INCOMING),
+            (self.up2_bn, self.recon_head, DepType.INCOMING),
         ])
 
     def forward(self, x, intermediary_outputs=None):
@@ -116,7 +122,7 @@ class UNetMulti(NetworkWithOps, nn.Module):
     def forward_head(self, name: str, x: torch.Tensor):
         feats = self.forward(x)
         if name == "class":
-            pooled = feats.mean(dim=(2, 3))  # global avg pool
+            pooled = feats.mean(dim=(2, 3))
             return self.classifier(pooled).squeeze(1)
         elif name == "recon":
             return self.recon_head(feats)    # image reconstruction
@@ -127,11 +133,13 @@ IM_MEAN = (.5533, .5829, .5946)
 IM_STD  = (.1527, .1628, .1726)
 
 train_transform = T.Compose([
+    T.Resize(256),
     T.ToTensor(),
     T.Normalize(IM_MEAN, IM_STD),
 ])
 
 val_transform = T.Compose([
+    T.Resize(256),
     T.ToTensor(),
     T.Normalize(IM_MEAN, IM_STD),
 ])
@@ -148,7 +156,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def get_exp():
-    model = UNetMulti(in_ch=3, base=4, bottleneck=32)
+    model = UNetMulti(in_ch=3, base=8, bottleneck=32)
     model.define_deps()
     model.to(device)
 
@@ -179,9 +187,9 @@ def get_exp():
         eval_dataset=val_dataset,
         device=device,
         learning_rate=1e-3,
-        batch_size=8,
+        batch_size=32,
         training_steps_to_do=200000,
-        name="vad_unet_multitask",
+        name="v0",
         root_log_dir="test_vad_unet_multitask",
         logger=Dash("test_vad_unet_multitask"),
         tasks=[cls_task, recon_task],  
