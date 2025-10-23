@@ -18,9 +18,10 @@ from scope_timer import ScopeTimer
 import traceback
 
 # from fashion_mnist_exp import get_exp
-from vad_unet_multi import get_exp
+from vad_unet_multi import get_exp, IM_MEAN, IM_STD
 # from vad_exp import get_exp
 # from segmentation_exp import get_exp
+# from imagenet_exp import get_exp
 
 experiment = get_exp()
 
@@ -230,10 +231,14 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
                 if pred_key in row:
                     arr = np.array(row[pred_key].detach().cpu() if hasattr(row[pred_key], "detach") else row[pred_key])
                     if arr.ndim >= 2 and not preview_attached:
-                        record.prediction_raw = tensor_to_bytes(row[pred_key])
+                        record.prediction_raw = tensor_to_bytes(row[pred_key], mean=IM_MEAN, std=IM_STD)
                         preview_attached = True
                     elif arr.size == 1:
                         record.extra_fields.append(make_task_field(pred_key, float(arr.reshape(-1)[0])))
+            
+            target = row.get("target", -1)
+            target_list = [int(target)] 
+            record.sample_label.extend(target_list)
 
         else:
             task_type = sample_stats.task_type
@@ -412,12 +417,12 @@ def process_sample(sid, dataset, do_resize, resize_dims):
 
             try:
                 if hasattr(dataset, "get_prediction_mask"):
-                    recon = dataset.get_prediction_mask(sid)
+                    recon = dataset.get_prediction_mask(sid, task_name = 'recon')
                     if recon is not None:
                         r = recon.detach().cpu() if isinstance(recon, torch.Tensor) else torch.tensor(recon)
                         if r.ndim == 2:
                             r = r.unsqueeze(0)
-                        pred_bytes = tensor_to_bytes(r) 
+                        pred_bytes = tensor_to_bytes(r, mean=IM_MEAN, std=IM_STD) 
             except Exception:
                 pred_bytes = b""
 
@@ -431,12 +436,12 @@ def process_sample(sid, dataset, do_resize, resize_dims):
 
             try:
                 if hasattr(dataset, "get_prediction_mask"):
-                    recon = dataset.get_prediction_mask(sid)  # stores latest dense pred; used here for recon preview
+                    recon = dataset.get_prediction_mask(sid, task_name = 'recon')  
                     if recon is not None:
                         r = recon.detach().cpu() if isinstance(recon, torch.Tensor) else torch.tensor(recon)
                         if r.ndim == 2:
                             r = r.unsqueeze(0)
-                        pred_bytes = tensor_to_bytes(r) 
+                        pred_bytes = tensor_to_bytes(r, mean=IM_MEAN, std=IM_STD)
             except Exception:
                 pred_bytes = b""
 
