@@ -42,10 +42,10 @@ class UNetMulti(NetworkWithOps, nn.Module):
         self.mid_bn7    = BatchNorm2dWithNeuronOps(C3)
 
         # ---- Decoder ----
-        self.up1_conv = Conv2dWithNeuronOps(C3 + C2, C2, kernel_size=3, padding=1)
+        self.up1_conv = Conv2dWithNeuronOps(C3, C2, kernel_size=3, padding=1)
         self.up1_bn   = BatchNorm2dWithNeuronOps(C2)
 
-        self.up2_conv = Conv2dWithNeuronOps(C2 + C1, C1, kernel_size=3, padding=1)
+        self.up2_conv = Conv2dWithNeuronOps(C2, C1, kernel_size=3, padding=1)
         self.up2_bn   = BatchNorm2dWithNeuronOps(C1)
 
         # ---- Heads ----
@@ -110,11 +110,13 @@ class UNetMulti(NetworkWithOps, nn.Module):
 
         # ---- Decoder ----
         u1 = F.interpolate(m, size=e2.shape[-2:], mode='bilinear', align_corners=False)
-        u1 = torch.cat([u1, e2], dim=1)
+        # u1 = torch.cat([u1, e2], dim=1)
+        u1 = u1 + e2        # using simple element-wise addition
         u1 = F.relu(self.up1_bn(self.up1_conv(u1, intermediary=intermediary_outputs)))
 
         u2 = F.interpolate(u1, size=e1.shape[-2:], mode='bilinear', align_corners=False)
-        u2 = torch.cat([u2, e1], dim=1)
+        # u2 = torch.cat([u2, e1], dim=1)
+        u2 = u2 + e1        # using simple element-wise addition
         u2 = F.relu(self.up2_bn(self.up2_conv(u2, intermediary=intermediary_outputs)))
 
         return u2  # feature map
