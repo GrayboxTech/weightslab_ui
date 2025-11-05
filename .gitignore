@@ -26,3 +26,4 @@ requirements\ copy.txt
 readme_old.md
 test_seg/*
 vad/*
+__pycache__/*
