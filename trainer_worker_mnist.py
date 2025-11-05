@@ -17,8 +17,8 @@ from torchvision import transforms
 from scope_timer import ScopeTimer
 import traceback
 
-# 🔽 MINIMAL CHANGE: point to your experiment + expose IM_MEAN/IM_STD
-from mnist_exp import get_exp, IM_MEAN, IM_STD
+# point to experiment + expose IM_MEAN/IM_STD
+from experiments.mnist_exp import get_exp, IM_MEAN, IM_STD
 
 experiment = get_exp()
 
