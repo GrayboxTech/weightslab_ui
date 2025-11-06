@@ -17,11 +17,14 @@ from torchvision import transforms
 from scope_timer import ScopeTimer
 import traceback
 
-# from fashion_mnist_exp import get_exp
-from vad_unet_multi import get_exp, IM_MEAN, IM_STD
-# from vad_exp import get_exp
-# from segmentation_exp import get_exp
-# from imagenet_exp import get_exp
+# Choose one experiment to import:
+from experiments.mnist import get_exp
+# from experiments.vad_exp import get_exp
+# from experiments.segmentation import get_exp
+# from experiments.imagenet import get_exp
+# from experiments.cad_models import get_exp
+# from experiments.mnist import get_exp
+# from experiments.vad_unet_multi import get_exp, IM_MEAN, IM_STD
 
 experiment = get_exp()
 

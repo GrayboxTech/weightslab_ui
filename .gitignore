@@ -1,6 +1,7 @@
 .mnist/*
 __pycache__/*
 examples/__pycache__/*
+experiments/__pycache__/*
 tiny-image-net-dbg/*
 tiny-image-net/*
 experiment_service_pb2.py
@@ -26,4 +27,3 @@ requirements\ copy.txt
 readme_old.md
 test_seg/*
 vad/*
-__pycache__/*
