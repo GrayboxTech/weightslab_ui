@@ -1,32 +1,42 @@
+import io
+import sys
 import grpc
 import time
-import io
-
-import numpy as np
-
-from concurrent import futures
-from threading import Thread
-from PIL import Image
-from typing import List, Tuple, Iterable
-from weightslab.experiment import ArchitectureOpType
 import torch
+import signal
+import traceback
+import numpy as np
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
-from collections import defaultdict
+
+from PIL import Image
+from threading import Thread
+from concurrent import futures
 from torchvision import transforms
 from scope_timer import ScopeTimer
-import traceback
+from collections import defaultdict
+from typing import List, Tuple, Iterable
 
-# Choose one experiment to import:
-from experiments.mnist import get_exp
-# from experiments.vad_exp import get_exp
-# from experiments.segmentation import get_exp
-# from experiments.imagenet import get_exp
-# from experiments.cad_models import get_exp
-# from experiments.mnist import get_exp
-# from experiments.vad_unet_multi import get_exp, IM_MEAN, IM_STD
+from weightslab.models.model_with_ops import ArchitectureNeuronsOpType
 
-experiment = get_exp()
+
+# if len(sys.argv) <= 1:
+#     sys.argv.append(
+#         "import sys; \
+#             sys.path.append('C:/Users/GuillaumePelluet/Documents/Codes/grayBox/');\
+#             from weightslab_ui.fashion_mnist_exp_under_2k import get_exp as exp;\
+#             get_exp=lambda : exp()"
+#     )
+
+# read function as input arguments, check arg reliability with exec(str_fct)
+"""
+    Call usage to start the trainer worker:
+        python .\trainer_worker.py "import sys;
+        sys.path.append('C:/Users/GuillaumePelluet/Documents/Codes/grayBox/');
+        from weightslab_ui.fashion_mnist_exp_under_2k import get_exp as exp;
+        get_exp=lambda : exp()"
+"""
+experiment = (exec(sys.argv[1], ns := {}), ns['get_exp'])[1]()
 
 
 def training_thread_callback():
@@ -74,11 +84,12 @@ def get_hyper_parameters_pb(
 
     return hyper_parameters_pb2
 
-def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
 
+def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
+    tensor_name = 'weight'
     layer_id = layer.get_module_id()
     neuron_representations = []
-    for neuron_idx in range(layer.neuron_count):
+    for neuron_idx in range(layer.out_neurons):
         age = int(layer.train_dataset_tracker.get_neuron_age(neuron_idx))
         trate = layer.train_dataset_tracker.get_neuron_triggers(neuron_idx)
         erate = layer.eval_dataset_tracker.get_neuron_triggers(neuron_idx)
@@ -87,7 +98,11 @@ def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
         trate = trate/age if age > 0 else 0
         erate = erate/evage if evage > 0 else 0
 
-        neuron_lr = layer.get_per_neuron_learning_rate(neuron_idx)
+        neuron_lr = layer.get_per_neuron_learning_rate(
+            neuron_idx,
+            is_incoming=False,
+            tensor_name=tensor_name
+        )
 
         neuron_representation = pb2.NeuronStatistics(
             neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=neuron_idx),
@@ -96,39 +111,33 @@ def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
             eval_trigger_rate=erate,
             learning_rate=neuron_lr,
         )
-        for incoming_id, incoming_lr in  layer.incoming_neuron_2_lr.items():
+        for incoming_id, incoming_lr in layer.incoming_neuron_2_lr[tensor_name].items():
             neuron_representation.incoming_neurons_lr[incoming_id] = incoming_lr
 
         neuron_representations.append(neuron_representation)
 
     return neuron_representations
 
+
 def get_layer_representation(layer) -> pb2.LayerRepresentation:
     layer_representation = None
-    if "Conv2d" in layer.__class__.__name__:
-        layer_representation = pb2.LayerRepresentation(
-            layer_id=layer.get_module_id(),
-            layer_name=layer.__class__.__name__,
-            layer_type="Conv2d",
-            incoming_neurons_count=layer.incoming_neuron_count,
-            neurons_count=layer.neuron_count,
-            kernel_size=layer.kernel_size[0],
-            stride=layer.stride[0],
-        )
-    elif "Linear" in layer.__class__.__name__:
-        layer_representation = pb2.LayerRepresentation(
-            layer_id=layer.get_module_id(),
-            layer_name=layer.__class__.__name__,
-            layer_type="Linear",
-            incoming_neurons_count=layer.incoming_neuron_count,
-            neurons_count=layer.neuron_count,
-        )
+    parameters = {
+        'layer_id': layer.get_module_id(),
+        'layer_name': layer.__class__.__name__,
+        'layer_type': layer.module_name,
+        'incoming_neurons_count': layer.in_neurons,
+        'neurons_count': layer.out_neurons,
+        'kernel_size': layer.kernel_size[0] if hasattr(layer, 'kernel_size') else None,
+        'stride': layer.stride[0] if hasattr(layer, 'stride') else None
+    }
+    layer_representation = pb2.LayerRepresentation(**parameters)
     if layer_representation is None:
         return None
 
     layer_representation.neurons_statistics.extend(
         get_neuron_representations(layer))
     return layer_representation
+
 
 def get_layer_representations(model):
     layer_representations = []
@@ -692,8 +701,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         return response
 
     def _apply_zerofy(self, layer, from_ids, to_ids):
-        in_max = int(layer.incoming_neuron_count)
-        out_max = int(layer.neuron_count)
+        in_max = int(layer.in_neurons)
+        out_max = int(layer.out_neurons)
 
         from_set = {i for i in set(from_ids) if 0 <= i < in_max}
         to_set   = {i for i in set(to_ids)   if 0 <= i < out_max}
@@ -717,7 +726,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
                 experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.PRUNE,
+                    op_type=ArchitectureNeuronsOpType.PRUNE,
                     layer_id=layer_id,
                     neuron_indices=set(neuron_ids))
 
@@ -726,9 +735,9 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 message=f"Pruned {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.ADD_NEURONS:
             experiment.apply_architecture_op(
-                op_type = ArchitectureOpType.ADD_NEURONS,
+                op_type=ArchitectureNeuronsOpType.ADD,
                 layer_id=weight_operations.layer_id,
-                neuron_count=weight_operations.neurons_to_add)
+                neuron_indices=weight_operations.neurons_to_add)
             answer = pb2.WeightsOperationResponse(
                 success=True,
                 message=\
@@ -742,16 +751,16 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     neuron_id.neuron_id)
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
                 experiment.apply_architecture_op(
-                    op_type=ArchitectureOpType.FREEZE,
+                    op_type=ArchitectureNeuronsOpType.FREEZE,
                     layer_id=layer_id,
-                    neuron_ids=neuron_ids)
+                    neuron_indices=neuron_ids)
             answer = pb2.WeightsOperationResponse(
                 success=True,
                 message=f"Frozen {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.REINITIALIZE:
             for neuron_id in weight_operations.neuron_ids:
                 experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.REINITIALIZE,
+                    op_type=ArchitectureNeuronsOpType.RESET,
                     layer_id=neuron_id.layer_id,
                     neuron_indices={neuron_id.neuron_id})
 
@@ -769,8 +778,12 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             if len(weight_operations.zerofy_predicates) > 0:
                 frozen = set()
                 try:
-                    for nid in range(getattr(layer, "neuron_count", 0)):
-                        if layer.get_per_neuron_learning_rate(nid) == 0.0:
+                    for nid in range(getattr(layer, "out_neurons", 0)):
+                        if layer.get_per_neuron_learning_rate(
+                            nid,
+                            is_incoming=False,
+                            tensor_name='weight'
+                        ) == 0.0:
                             frozen.add(nid)
                 except Exception:
                     pass
@@ -779,7 +792,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 try:
                     td_tracker = getattr(layer, "train_dataset_tracker", None)
                     if td_tracker is not None:
-                        for nid in range(getattr(layer, "neuron_count", 0)):
+                        for nid in range(getattr(layer, "out_neurons", 0)):
                             age = int(td_tracker.get_neuron_age(nid))
                             if age > 0:
                                 older.add(nid)
@@ -804,7 +817,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         return answer
 
     def GetWeights(self, request, context):
-        # print(f"ExperimentServiceServicer.GetWeights({request})")
+        print(f"ExperimentServiceServicer.GetWeights({request})")
         answer = pb2.WeightsResponse(success=True, error_message="")
 
         neuron_id = request.neuron_id
@@ -816,18 +829,17 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             answer.error_messages = str(e)
             return answer
 
-        #answer.neuron_id = request.neuron_id
         answer.neuron_id.CopyFrom(request.neuron_id)
         answer.layer_name = layer.__class__.__name__
-        answer.incoming = layer.incoming_neuron_count
-        answer.outgoing = layer.neuron_count
+        answer.incoming = layer.in_neurons
+        answer.outgoing = layer.out_neurons
         if "Conv2d" in layer.__class__.__name__:
             answer.layer_type = "Conv2d"
             answer.kernel_size = layer.kernel_size[0]
         elif "Linear" in layer.__class__.__name__:
             answer.layer_type = "Linear"
 
-        if neuron_id.neuron_id >= layer.neuron_count:
+        if neuron_id.neuron_id >= layer.out_neurons:
             answer.success = False
             answer.error_messages = \
                 f"Neuron {neuron_id.neuron_id} outside bounds."
@@ -866,7 +878,10 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
             with torch.no_grad():
                 intermediaries = {request.layer_id: None}
-                _= experiment.model.forward(x, intermediary_outputs=intermediaries)
+                experiment.model.forward(
+                    x, 
+                    intermediary_outputs=intermediaries
+                )
 
             if intermediaries[request.layer_id] is None:
                 raise ValueError(f"No intermediary layer {request.layer_id}")
@@ -898,15 +913,59 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 f"Traceback: {traceback.format_exc()}")
 
         return empty_resp
+    
+
+import os
+import sys
+import subprocess
+import signal
+import time
+
+def force_kill_all_python_processes():
+    """
+    Tente de tuer TOUS les processus python en cours d'exécution sur la machine.
+    *** ATTENTION : UTILISER AVEC EXTRÊME PRÉCAUTION ! ***
+    """
+    print("ATTENTION: Tentative de tuer tous les processus python. Ceci pourrait affecter d'autres applications.")
+    
+    if sys.platform.startswith('win'):
+        # Windows : Utilise taskkill pour tuer tous les processus 'python.exe'
+        try:
+            # /F : Force la terminaison
+            # /IM : Spécifie le nom de l'image (python.exe)
+            subprocess.run(['taskkill', '/F', '/IM', 'python.exe'], check=True)
+            print("Tous les processus python (Windows) ont été terminés.")
+        except subprocess.CalledProcessError as e:
+            # Cela arrive si aucun processus python n'est trouvé
+            print(f"Aucun processus python trouvé ou erreur lors de la terminaison : {e}")
+            
+    elif sys.platform.startswith('linux') or sys.platform.startswith('darwin'):
+        # Linux/macOS : Utilise pkill avec SIGKILL (-9) pour les processus 'python' ou 'python3'
+        try:
+            # pgrep trouve les PIDs des processus nommés 'python' et pkill envoie le signal 9 (SIGKILL)
+            # -f : recherche le pattern dans la ligne de commande complète (y compris les arguments)
+            subprocess.run(['pkill', '-9', '-f', 'python'], check=True)
+            print("Tous les processus python (Unix/Linux/macOS) ont été terminés.")
+        except subprocess.CalledProcessError as e:
+            # Cela arrive si aucun processus python n'est trouvé
+            print(f"Aucun processus python trouvé ou erreur lors de la terminaison : {e}")
+            
+    else:
+        print(f"Système d'exploitation '{sys.platform}' non supporté pour l'arrêt forcé.")
+
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=6))
     servicer = ExperimentServiceServicer()
     pb2_grpc.add_ExperimentServiceServicer_to_server(servicer, server)
     server.add_insecure_port('[::]:50051')
-    server.start()
-    # experiment.toggle_training_status()
-    server.wait_for_termination()
+    try:
+        server.start()
+        print("Server started. Press Ctrl+C to stop.")
+        server.wait_for_termination()
+    except KeyboardInterrupt:
+        # Brut force kill this service
+        force_kill_all_python_processes()
 
 
 if __name__ == '__main__':

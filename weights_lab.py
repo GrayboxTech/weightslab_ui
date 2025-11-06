@@ -46,6 +46,12 @@ from flask import Response, request, abort
 import hashlib
 import io
 
+# sys.argv.extend(
+#     [
+#         "--root_directory", r"C:\Users\GuillaumePelluet\Documents\Codes\grayBox\outputs\test_mnist\202510221800"
+#     ]
+# )
+
 logger = logging.getLogger("ui")
 
 _HYPERPARAM_COLUMNS = ["label", "type", "name", "value"]
@@ -252,6 +258,7 @@ class UIState:
     """
     def __init__(self, root_directory: str):
         self.root_directory = root_directory
+        os.makedirs(self.root_directory, exist_ok=True)
         self.dirty = False
         self.dirty_dfs = []
 
@@ -678,9 +685,6 @@ class UIState:
                 extra={"origin": getattr(sample_statistics, "origin", None)}
             )
 
-
-
-
     def get_layer_df_row_by_id(self, layer_id: int):
         with self.lock:
             return self.layers_df.loc[self.layer_id_to_df_row_idx[layer_id]]
@@ -845,16 +849,32 @@ def get_freeze_neurons_button(layer_id):
     )
     return button
 
+def get_reset_neurons_button(layer_id):
+    button = dbc.Button(
+        "R",
+        id={"type": "layer-reset-btn", "layer_id": layer_id},
+        color='transparent',
+        style={
+            'fontSize': _LAYER_BUTTON_FNT_SZ,
+            "borderColor": "transparent",
+            "color": "black",
+            'width': _LAYER_BUTTON_WIDTH,
+            'height': _LAYER_BUTTON_HEIGHT,
+        }
+    )
+    return button
+
 
 def get_layer_ops_buttons(layer_id):
     button_minus = get_minus_neurons_button(layer_id)
     button_plus = get_plus_neurons_button(layer_id)
     button_freeze = get_freeze_neurons_button(layer_id)
+    button_reset = get_reset_neurons_button(layer_id)
     # button_inspect = get_inspect_neurons_button(layer_id)
     return html.Div(
         dbc.Row(
             dbc.Col(
-                [button_minus, button_plus, button_freeze]
+                [button_minus, button_plus, button_freeze, button_reset]
             )
         ),
         style={
@@ -2335,7 +2355,6 @@ def main():
         </html>
         '''
 
-
     setup_logging()
 
     logging.getLogger("dash").disabled = True
@@ -2623,19 +2642,26 @@ def main():
             layer_row_idx = ui_state.layer_id_to_df_row_idx[layer_id]
             ui_state.layers_df.loc[layer_row_idx]['outgoing'] -= 1
 
-        weight_operation=pb2.WeightOperation(
-            op_type=pb2.WeightOperationType.REMOVE_NEURONS)
+        weight_operation = pb2.WeightOperation(
+            op_type=pb2.WeightOperationType.REMOVE_NEURONS
+        )
 
+        neuron_id = ui_state.selected_neurons[layer_id]
+        if len(neuron_id) > 0:
+            neuron_id = neuron_id[0]
+        if neuron_id is None:
+            neuron_id = layer_details.outgoing - 1
         removed_neuron_id = pb2.NeuronId(
             layer_id=layer_id,
-            neuron_id=layer_details.outgoing - 1)
+            neuron_id=neuron_id
+        )
         weight_operation.neuron_ids.extend([removed_neuron_id])
 
         request = pb2.WeightsOperationRequest(weight_operation=weight_operation)
         response = stub.ManipulateWeights(request)
         logger.info("Removed neuron", extra={
             "layer_id": int(layer_id),
-            "neuron_id": int(layer_details.outgoing - 1),
+            "neuron_id": int(neuron_id),
             "resp_message": getattr(response, "message", "")[:200]
         })
 
@@ -2651,7 +2677,7 @@ def main():
         if not triggered:
             return dash.no_update
 
-        layer_id = triggered['layer_id']  
+        layer_id = triggered['layer_id']
         n_add = 1
 
         next_layer_id = _get_next_layer_id(ui_state, layer_id)
@@ -2672,7 +2698,7 @@ def main():
         ui_state.update_from_server_state(state)
 
         if next_layer_id is None or old_incoming is None:
-            return 
+            return
 
         new_incoming = _get_incoming_count(ui_state, next_layer_id)
         if new_incoming <= old_incoming:
@@ -2733,13 +2759,60 @@ def main():
 
         weight_operation=pb2.WeightOperation(
             op_type=pb2.WeightOperationType.FREEZE,
-            layer_id=layer_id)
+            layer_id=layer_id
+        )
+        neuron_id = ui_state.selected_neurons[layer_id]
+        if len(neuron_id) > 0:
+            neuron_id = neuron_id[0]
+        if neuron_id is None:
+            removed_neuron_id = pb2.NeuronId(
+                layer_id=layer_id,
+                neuron_id=neuron_id
+            )
+            weight_operation.neuron_ids.extend([removed_neuron_id])
 
         request = pb2.WeightsOperationRequest(
             weight_operation=weight_operation)
         response = stub.ManipulateWeights(request)
         logger.info("Froze layer", extra={
             "layer_id": int(layer_id),
+            "neuron_id": int(neuron_id),
+            "resp_message": getattr(response, "message", "")[:200]
+        })
+
+    @app.callback(
+        Input({"type": "layer-reset-btn", "layer_id": ALL}, "n_clicks"),
+    )
+    def on_layer_reset_neuron_callback(_):
+        ctx = dash.callback_context
+
+        if not ctx.triggered:
+            return no_update
+
+        prop_id = ctx.triggered[0]['prop_id']
+        btn_dict = eval(prop_id.split('.')[0])
+        layer_id = btn_dict['layer_id']
+
+        weight_operation=pb2.WeightOperation(
+            op_type=pb2.WeightOperationType.REINITIALIZE,
+            layer_id=layer_id
+        )
+        neuron_id = ui_state.selected_neurons[layer_id]
+        if len(neuron_id) > 0:
+            neuron_id = neuron_id[0]
+        if neuron_id is None:
+            removed_neuron_id = pb2.NeuronId(
+                layer_id=layer_id,
+                neuron_id=neuron_id
+            )
+            weight_operation.neuron_ids.extend([removed_neuron_id])
+
+        request = pb2.WeightsOperationRequest(
+            weight_operation=weight_operation)
+        response = stub.ManipulateWeights(request)
+        logger.info("Froze layer", extra={
+            "layer_id": int(layer_id),
+            "neuron_id": int(neuron_id),
             "resp_message": getattr(response, "message", "")[:200]
         })
 
@@ -2771,11 +2844,24 @@ def main():
         prevent_initial_call=True  # Skip initial execution
     )
     def display_weights_of_neuron(selected_rows):
+        nonlocal ui_state
+
         if not selected_rows:
             return no_update
 
-        selected_row_index = selected_rows
-        logger.info("Selected neuron row indices", extra={"indices": list(map(int, selected_rows))})
+        ctx = dash.callback_context
+
+        if not ctx.triggered:
+            return no_update
+
+        prop_id = ctx.triggered[0]['prop_id']
+        btn_dict = eval(prop_id.split('.')[0])
+        layer_id = btn_dict['layer_id']
+
+        selected_row_index = selected_rows[layer_id]
+        if selected_row_index is not None:
+            ui_state.selected_neurons[layer_id] = selected_row_index  # Only one line selected ?
+        logger.info("Selected neuron row indices", extra={"layer_id": int(layer_id), "indices": list(map(int, selected_row_index))})
 
         # row = data[selected_row_index]
         # print("Selected row: ", row)
@@ -3755,13 +3841,15 @@ def main():
         return graph_divs
 
     @app.callback(
-        Output({'type': "graph", "index": MATCH}, "figure", allow_duplicate=True),
+        Output({'type': "graph", "index": MATCH}, "figure", 
+               allow_duplicate=True),
         Input("graphss-render-freq", "n_intervals"),
         State({'type': "graph", "index": MATCH}, "id"),
         State('experiment_checklist', "value"),
         # State("plot-smoothness-slider", "value"),
         prevent_initial_call=True,
     )
+
     def update_graph(_, graph_id, checklist):
         # print("update_graph", graph_id, checklist)
         nonlocal ui_state
@@ -3813,8 +3901,9 @@ def main():
             Input({'type': "graph", "index": MATCH}, 'clickData'),
         ],
         State({'type': "graph", "index": MATCH}, "figure"),
-        prevent_initial_call = True
+        prevent_initial_call=True
     )
+
     def update_selection_of_checkpoint(hoverData, clickData, figure):
         nonlocal stub
         nonlocal ui_state
@@ -3909,8 +3998,8 @@ def main():
 
         return figure, no_update
 
-
     app.run(debug=False, port=8050, use_reloader=False)
+
 
 if __name__ == '__main__':
     main()
