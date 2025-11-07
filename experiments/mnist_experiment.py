@@ -8,7 +8,7 @@ from torchvision import transforms as T
 from torchvision import datasets as ds
 from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
 
-from board import Dash
+from .board import Dash
 from weightslab.experiment.experiment import Experiment
 from weightslab.tests.torch_models import ResNet18, FashionCNNSequential
 

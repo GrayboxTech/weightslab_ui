@@ -22,7 +22,7 @@ from torchvision import transforms
 # Local imports
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
-from scope_timer import ScopeTimer
+from utils.scope_timer import ScopeTimer
 from weightslab.models.model_with_ops import ArchitectureNeuronsOpType
 
 def get_hyper_parameters_pb(

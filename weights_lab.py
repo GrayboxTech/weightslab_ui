@@ -38,7 +38,7 @@ from io import BytesIO
 from PIL import Image
 from collections import defaultdict
 from dash.dash_table.Format import Format, Scheme
-from scope_timer import ScopeTimer
+from utils.scope_timer import ScopeTimer
 from dataclasses import dataclass
 from math import isqrt
 import random
