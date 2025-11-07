@@ -134,7 +134,7 @@ from your_custom_exp import get_exp
 ### Start the trainer process:
 
 ```bash
-python trainer_worker.py --experiment fashion_mnist_exp_under_2k:get_exp
+python trainer_worker.py --experiment experiments.mnist_experiment:get_exp # path.to.py_exp:function
 ```
 
 ## Launch the UI monitoring process:
