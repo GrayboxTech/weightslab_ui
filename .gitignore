@@ -1,7 +1,5 @@
 .mnist/*
-__pycache__/*
-examples/__pycache__/*
-experiments/__pycache__/*
+__pycache__/
 tiny-image-net-dbg/*
 tiny-image-net/*
 experiment_service_pb2.py
