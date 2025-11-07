@@ -1,22 +1,28 @@
-import io
+# Standard library imports
 import sys
-import grpc
+import subprocess
 import time
-import torch
-import signal
+import argparse
+import importlib
+import io
 import traceback
-import numpy as np
-import experiment_service_pb2 as pb2
-import experiment_service_pb2_grpc as pb2_grpc
-
-from PIL import Image
+from pathlib import Path
 from threading import Thread
 from concurrent import futures
-from torchvision import transforms
-from scope_timer import ScopeTimer
 from collections import defaultdict
 from typing import List, Tuple, Iterable
 
+# Third-party imports
+import grpc
+import torch
+import numpy as np
+from PIL import Image
+from torchvision import transforms
+
+# Local imports
+import experiment_service_pb2 as pb2
+import experiment_service_pb2_grpc as pb2_grpc
+from scope_timer import ScopeTimer
 from weightslab.models.model_with_ops import ArchitectureNeuronsOpType
 
 def get_hyper_parameters_pb(
@@ -872,45 +878,38 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 f"Traceback: {traceback.format_exc()}")
 
         return empty_resp
-    
-
-import os
-import sys
-import subprocess
-import signal
-import time
 
 def force_kill_all_python_processes():
     """
-    Tente de tuer TOUS les processus python en cours d'exécution sur la machine.
-    *** ATTENTION : UTILISER AVEC EXTRÊME PRÉCAUTION ! ***
+    Attempt to kill ALL running Python processes on the machine.
+    *** WARNING: USE WITH EXTREME CAUTION! ***
     """
-    print("ATTENTION: Tentative de tuer tous les processus python. Ceci pourrait affecter d'autres applications.")
+    print("WARNING: Attempting to kill all Python processes. This could affect other applications.")
     
     if sys.platform.startswith('win'):
-        # Windows : Utilise taskkill pour tuer tous les processus 'python.exe'
+        # Windows: use taskkill to terminate all 'python.exe' processes
         try:
-            # /F : Force la terminaison
-            # /IM : Spécifie le nom de l'image (python.exe)
+            # /F : Force termination
+            # /IM : Specifies the image name (python.exe)
             subprocess.run(['taskkill', '/F', '/IM', 'python.exe'], check=True)
-            print("Tous les processus python (Windows) ont été terminés.")
+            print("All Python processes (Windows) have been terminated.")
         except subprocess.CalledProcessError as e:
-            # Cela arrive si aucun processus python n'est trouvé
-            print(f"Aucun processus python trouvé ou erreur lors de la terminaison : {e}")
+            # This happens if no Python process is found
+            print(f"No Python process found or an error occurred during termination: {e}")
             
     elif sys.platform.startswith('linux') or sys.platform.startswith('darwin'):
-        # Linux/macOS : Utilise pkill avec SIGKILL (-9) pour les processus 'python' ou 'python3'
+        # Linux/macOS: use pkill with SIGKILL (-9) to kill 'python' or 'python3' processes
         try:
-            # pgrep trouve les PIDs des processus nommés 'python' et pkill envoie le signal 9 (SIGKILL)
-            # -f : recherche le pattern dans la ligne de commande complète (y compris les arguments)
+            # pgrep finds the PIDs of processes named 'python', and pkill sends signal 9 (SIGKILL)
+            # -f : searches the full command line (including arguments)
             subprocess.run(['pkill', '-9', '-f', 'python'], check=True)
-            print("Tous les processus python (Unix/Linux/macOS) ont été terminés.")
+            print("All Python processes (Unix/Linux/macOS) have been terminated.")
         except subprocess.CalledProcessError as e:
-            # Cela arrive si aucun processus python n'est trouvé
-            print(f"Aucun processus python trouvé ou erreur lors de la terminaison : {e}")
+            # This happens if no Python process is found
+            print(f"No Python process found or an error occurred during termination: {e}")
             
     else:
-        print(f"Système d'exploitation '{sys.platform}' non supporté pour l'arrêt forcé.")
+        print(f"Operating system '{sys.platform}' not supported for forced termination.")
 
 
 def serve():
@@ -928,9 +927,6 @@ def serve():
 
 
 if __name__ == '__main__':
-    import argparse
-    import importlib
-    from pathlib import Path
 
     if str(Path.cwd()) not in sys.path:
         sys.path.insert(0, str(Path.cwd()))
