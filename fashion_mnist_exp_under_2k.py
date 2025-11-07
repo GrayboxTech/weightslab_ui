@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 from typing import Dict
 import torch
 import torch as th
@@ -19,8 +20,10 @@ from weightslab.tests.torch_models import ResNet18, FashionCNNSequential
 
 def get_exp():
     # Output directory
-    timestamp = "202510221800"  # str(time.time())
-    output_dir = r"C:\Users\GuillaumePelluet\Documents\Codes\grayBox\outputs\test_mnist"
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # timestamp = "000"  # str(time.time())
+    output_dir = r"out/" #r"C:\Users\GuillaumePelluet\Documents\Codes\grayBox\outputs\test_mnist"
     os.makedirs(output_dir, exist_ok=True)
     print(f"Output directory is {os.path.join(output_dir, timestamp)}")
 
@@ -30,8 +33,8 @@ def get_exp():
 
     # Models
     device = 'cpu'  # th.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = FashionCNNSequential()
-    # model = ResNet18()
+    # model = FashionCNNSequential()
+    model = ResNet18()
     model.to(device)
 
     # Metrics & Loss

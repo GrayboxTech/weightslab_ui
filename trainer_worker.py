@@ -19,47 +19,6 @@ from typing import List, Tuple, Iterable
 
 from weightslab.models.model_with_ops import ArchitectureNeuronsOpType
 
-
-# if len(sys.argv) <= 1:
-#     sys.argv.append(
-#         "import sys; \
-#             sys.path.append('C:/Users/GuillaumePelluet/Documents/Codes/grayBox/');\
-#             from weightslab_ui.fashion_mnist_exp_under_2k import get_exp as exp;\
-#             get_exp=lambda : exp()"
-#     )
-
-# read function as input arguments, check arg reliability with exec(str_fct)
-"""
-    Call usage to start the trainer worker:
-        python .\trainer_worker.py "import sys;
-        sys.path.append('C:/Users/GuillaumePelluet/Documents/Codes/grayBox/');
-        from weightslab_ui.fashion_mnist_exp_under_2k import get_exp as exp;
-        get_exp=lambda : exp()"
-"""
-experiment = (exec(sys.argv[1], ns := {}), ns['get_exp'])[1]()
-
-
-def training_thread_callback():
-    while True:
-        if experiment.get_is_training():
-            experiment.train_step_or_eval_full()
-
-
-training_thread = Thread(target=training_thread_callback)
-training_thread.start()
-
-samples_packaging_timer = ScopeTimer("samples_packaging")
-
-HYPER_PARAMETERS = {
-    ("Experiment Name", "experiment_name", "text", lambda: experiment.name),
-    ("Left Training Steps", "training_left", "number", lambda: experiment.training_steps_to_do),
-    ("Learning Rate", "learning_rate", "number", lambda: experiment.learning_rate),
-    ("Batch Size", "batch_size", "number", lambda: experiment.batch_size),
-    ("Eval Frequency", "eval_frequency", "number", lambda: experiment.eval_full_to_train_steps_ratio),
-    ("Checkpoint Frequency", "checkpooint_frequency", "number", lambda: experiment.experiment_dump_to_train_steps_ratio),
-}
-
-
 def get_hyper_parameters_pb(
         hype_parameters_desc_tuple: Tuple) -> List[pb2.HyperParameterDesc]:
 
@@ -969,4 +928,53 @@ def serve():
 
 
 if __name__ == '__main__':
+    import argparse
+    import importlib
+    from pathlib import Path
+
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+
+    parser = argparse.ArgumentParser(description="Trainer worker")
+    parser.add_argument(
+        "--experiment",
+        required=True,
+        help="Experiment factory in 'package.module:function' form, "
+             "e.g. fashion_mnist_exp_under_2k:get_exp",
+    )
+    args, _ = parser.parse_known_args()
+
+    def import_callable(spec: str):
+        if ":" not in spec:
+            raise SystemExit("Invalid --experiment. Expected 'package.module:function'")
+        module, func = spec.split(":", 1)
+        mod = importlib.import_module(module)
+        fn = getattr(mod, func, None)
+        if not callable(fn):
+            raise SystemExit(f"'{module}:{func}' not found or not callable")
+        return fn
+
+    get_exp = import_callable(args.experiment)
+    experiment = get_exp()
+    print(f"[trainer_worker] Loaded experiment from {args.experiment}: {experiment}")
+
+    def training_thread_callback():
+        while True:
+            if experiment.get_is_training():
+                experiment.train_step_or_eval_full()
+
+    samples_packaging_timer = ScopeTimer("samples_packaging")
+
+    HYPER_PARAMETERS = {
+        ("Experiment Name", "experiment_name", "text", lambda: experiment.name),
+        ("Left Training Steps", "training_left", "number", lambda: experiment.training_steps_to_do),
+        ("Learning Rate", "learning_rate", "number", lambda: experiment.learning_rate),
+        ("Batch Size", "batch_size", "number", lambda: experiment.batch_size),
+        ("Eval Frequency", "eval_frequency", "number", lambda: experiment.eval_full_to_train_steps_ratio),
+        ("Checkpoint Frequency", "checkpoint_frequency", "number", lambda: experiment.experiment_dump_to_train_steps_ratio),
+    }
+
+    training_thread = Thread(target=training_thread_callback, daemon=True)
+    training_thread.start()
+
     serve()
