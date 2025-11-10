@@ -23,7 +23,7 @@ from torchvision import transforms
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
 from utils.scope_timer import ScopeTimer
-from weightslab.models.model_with_ops import ArchitectureNeuronsOpType
+from weightslab.modules.neuron_ops import ArchitectureNeuronsOpType
 
 def get_hyper_parameters_pb(
         hype_parameters_desc_tuple: Tuple) -> List[pb2.HyperParameterDesc]:
