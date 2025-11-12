@@ -77,7 +77,7 @@ def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
             learning_rate=neuron_lr,
         )
         for incoming_id, incoming_lr in layer.incoming_neuron_2_lr[tensor_name].items():
-            neuron_representation.incoming_neurons_lr[incoming_id] = incoming_lr
+            neuron_representation.incoming_lr[incoming_id] = incoming_lr
 
         neuron_representations.append(neuron_representation)
 
@@ -952,6 +952,7 @@ if __name__ == '__main__':
 
     get_exp = import_callable(args.experiment)
     experiment = get_exp()
+    experiment.register_train_loop_callback(lambda: experiment.display_stats())
     print(f"[trainer_worker] Loaded experiment from {args.experiment}: {experiment}")
 
     def training_thread_callback():
