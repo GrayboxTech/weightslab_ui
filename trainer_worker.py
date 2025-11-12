@@ -106,7 +106,16 @@ def get_layer_representation(layer) -> pb2.LayerRepresentation:
 
 def get_layer_representations(model):
     layer_representations = []
+    # helper to check if layer is BatchNorm layer
+    def _is_batchnorm(layer) -> bool:
+        name = getattr(layer, "__class__", type(layer)).__name__
+        mname = getattr(layer, "module_name", "") 
+        return ("BatchNorm" in name) or ("batchnorm" in mname.lower())
+
     for layer in model.layers:
+        # Skip BatchNorm layers
+        if _is_batchnorm(layer):
+            continue
         layer_representation = get_layer_representation(layer)
         if layer_representation is None:
             continue
