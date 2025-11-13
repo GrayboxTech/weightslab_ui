@@ -25,6 +25,55 @@ import experiment_service_pb2_grpc as pb2_grpc
 from utils.scope_timer import ScopeTimer
 from weightslab.modules.neuron_ops import ArchitectureNeuronsOpType
 
+
+def _yolo_tensor_to_bboxes(box_data, default_score=0.0):
+    """
+    Convert YOLO-style boxes (class, x_c, y_c, w, h [,score]) to BoundingBox protos.
+    Assumes coordinates are normalized to [0,1].
+    """
+    if box_data is None:
+        return []
+
+    if hasattr(box_data, "detach"):
+        arr = box_data.detach().cpu().numpy()
+    else:
+        arr = np.asarray(box_data)
+
+    arr = np.array(arr, dtype=np.float32)
+
+    if arr.size == 0:
+        return []
+
+    if arr.ndim == 1:
+        # Single box: [cls, x, y, w, h] or [cls, x, y, w, h, score]
+        if arr.shape[0] in (5, 6):
+            arr = arr.reshape(1, -1)
+        else:
+            return []
+
+    if arr.ndim != 2 or arr.shape[1] < 5:
+        # Not a (N, >=5) array
+        return []
+
+    boxes = []
+    for row in arr:
+        cls_id = int(row[0])
+        x_c, y_c, w, h = float(row[1]), float(row[2]), float(row[3]), float(row[4])
+        score = float(row[5]) if arr.shape[1] >= 6 else float(default_score)
+        boxes.append(
+            pb2.BoundingBox(
+                x_center=x_c,
+                y_center=y_c,
+                width=w,
+                height=h,
+                class_id=cls_id,
+                score=score,
+                is_difficult=False,
+            )
+        )
+    return boxes
+
+
 def get_hyper_parameters_pb(
         hype_parameters_desc_tuple: Tuple) -> List[pb2.HyperParameterDesc]:
 
@@ -235,6 +284,20 @@ def get_data_set_representation(dataset) -> pb2.SampleStatistics:
                 else:
                     target_list = _class_ids(label, num_classes, ignore_index)
                 pred_list = _class_ids(row.get("prediction_raw"), num_classes, ignore_index)
+            elif task_type == "detection":
+                # YOLO-style detection: boxes stored in label/target
+                label = row.get("label", row.get("target", None))
+                gt_boxes = _yolo_tensor_to_bboxes(label, default_score=1.0)
+                record.gt_boxes.extend(gt_boxes)
+
+                # Predictions: look for prediction_boxes first, then prediction_raw
+                pred_raw = row.get("prediction_boxes", row.get("prediction_raw", None))
+                pred_boxes = _yolo_tensor_to_bboxes(pred_raw, default_score=0.0)
+                record.pred_boxes.extend(pred_boxes)
+
+                # Use class IDs for the histogram-like fields
+                target_list = sorted({b.class_id for b in gt_boxes})
+                pred_list   = sorted({b.class_id for b in pred_boxes})
             else:
                 target = row.get("label", row.get("target", -1))
                 pred   = row.get("prediction_raw", -1)
@@ -375,6 +438,8 @@ def process_sample(sid, dataset, do_resize, resize_dims):
         cls_label = -1
         mask_bytes = b""
         pred_bytes = b""
+        gt_boxes = []
+        pred_boxes = []
 
         if task_type == "classification":
             if isinstance(label, (list, np.ndarray)):
@@ -383,6 +448,7 @@ def process_sample(sid, dataset, do_resize, resize_dims):
                 cls_label = int(np.array(label.cpu()).item())
             else:
                 cls_label = int(label)
+
         elif task_type == "segmentation":
             num_classes = getattr(dataset, "num_classes", 21)
             try:
@@ -397,6 +463,19 @@ def process_sample(sid, dataset, do_resize, resize_dims):
                         pred_bytes = mask_to_png_bytes(pred_mask, num_classes=num_classes)
             except Exception:
                 pred_bytes = b""
+
+        elif task_type == "detection":
+            # YOLO-style detection: boxes in label
+            gt_boxes = _yolo_tensor_to_bboxes(label, default_score=1.0)
+            if gt_boxes:
+                cls_label = gt_boxes[0].class_id
+
+            try:
+                if hasattr(dataset, "get_prediction_boxes"):
+                    pred_targets = dataset.get_prediction_boxes(sid)
+                    pred_boxes = _yolo_tensor_to_bboxes(pred_targets, default_score=0.0)
+            except Exception:
+                pred_boxes = []
 
         elif task_type == "reconstruction":
             mask_bytes = raw_bytes if raw_bytes else transformed_bytes
@@ -431,11 +510,11 @@ def process_sample(sid, dataset, do_resize, resize_dims):
             except Exception:
                 pred_bytes = b""
 
-        return sid, transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes
+        return sid, transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes, gt_boxes, pred_boxes
 
     except Exception as e:
         print(f"[Error] GetSamples({sid}) failed: {e}")
-        return sid, None, None, -1, b"", b""
+        return sid, None, None, -1, b"", b"", [], []
 
 class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
     def StreamStatus(self, request_iterator, context):
@@ -589,6 +668,11 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             return pb2.SampleRequestResponse(
                 error_message=f"Sample {request.sample_id} not found.")
 
+        task_type = getattr(
+            experiment, "task_type",
+            getattr(dataset, "task_type", "classification")
+        )
+
         transformed_tensor, idx, label = dataset._getitem_raw(request.sample_id)
         # #TODO: apply transform too
         
@@ -603,13 +687,39 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         except Exception as e:
             return pb2.SampleRequestResponse(error_message=str(e))
 
-        response = pb2.SampleRequestResponse(
-            sample_id=request.sample_id,
-            origin=request.origin,
-            label=label,
-            raw_data=raw_image_bytes,         
-            data=transformed_image_bytes, 
-        )
+        if task_type == "detection":
+            # label is expected to be YOLO-style boxes: [cls, x, y, w, h (, score)]
+            gt_boxes = _yolo_tensor_to_bboxes(label, default_score=1.0)
+            cls_label = gt_boxes[0].class_id if gt_boxes else -1
+
+            # Optional: predicted boxes, if your dataset exposes them
+            pred_boxes = []
+            try:
+                if hasattr(dataset, "get_prediction_boxes"):
+                    pred_targets = dataset.get_prediction_boxes(request.sample_id)
+                    pred_boxes = _yolo_tensor_to_bboxes(pred_targets, default_score=0.0)
+            except Exception:
+                pred_boxes = []
+
+            response = pb2.SampleRequestResponse(
+                sample_id=request.sample_id,
+                origin=request.origin,
+                label=int(cls_label),
+                raw_data=raw_image_bytes,
+                data=transformed_image_bytes,
+            )
+            response.gt_boxes.extend(gt_boxes)
+            response.pred_boxes.extend(pred_boxes)
+
+        else:
+            # original behavior for non-detection tasks
+            response = pb2.SampleRequestResponse(
+                sample_id=request.sample_id,
+                origin=request.origin,
+                label=label,
+                raw_data=raw_image_bytes,         
+                data=transformed_image_bytes, 
+            )
 
         return response
 
@@ -632,18 +742,28 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             }
             results = {}
             for future in concurrent.futures.as_completed(fut_map):
-                sid, transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes = future.result()
-                results[sid] = (transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes)
+                sid, transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes, gt_boxes, pred_boxes = future.result()
+                results[sid] = (transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes, gt_boxes, pred_boxes)
 
         # build response preserving input order
         for sid in request.sample_ids:
-            transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes = results.get(
-                sid, (None, None, -1, b"", b"")
+            transformed_bytes, raw_bytes, cls_label, mask_bytes, pred_bytes, gt_boxes, pred_boxes = results.get(
+                sid, (None, None, -1, b"", b"", [], [])
             )
             if transformed_bytes is None or raw_bytes is None:
                 continue
 
-            if task_type == "segmentation":
+            if task_type == "detection":
+                sample_response = pb2.SampleRequestResponse(
+                    sample_id=sid,
+                    label=cls_label,
+                    data=transformed_bytes,
+                    raw_data=raw_bytes,
+                )
+                sample_response.gt_boxes.extend(gt_boxes)
+                sample_response.pred_boxes.extend(pred_boxes)
+
+            elif task_type == "segmentation":
                 sample_response = pb2.SampleRequestResponse(
                     sample_id=sid,
                     label=cls_label,
@@ -669,7 +789,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     raw_data=raw_bytes,
                     mask=b"",
                     prediction=b"",
-                )     
+                )
             response.samples.append(sample_response)
 
         return response

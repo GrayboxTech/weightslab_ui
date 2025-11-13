@@ -199,6 +199,22 @@ message ActivationResponse {
   repeated ActivationMap activations = 3;
 }
 
+message BoundingBox {
+  // Normalized YOLO-style box coordinates [0,1]
+  float x_center = 1;
+  float y_center = 2;
+  float width   = 3;
+  float height  = 4;
+
+  // Class ID
+  int32 class_id = 5;
+
+  // Confidence (0–1)
+  float score = 6;
+
+  // Optional flags, e.g. "difficult" samples
+  bool is_difficult = 7;
+}
 
 message TaskField {
   string name = 1;
@@ -221,7 +237,11 @@ message RecordMetadata {
   repeated TaskField extra_fields = 7;     
   bytes mask_preview = 8;                  
   bytes prediction_raw = 9;                 
-  string task_type = 10;   
+  string task_type = 10;
+
+  // Detection-specific information
+  repeated BoundingBox gt_boxes   = 11;  // ground-truth boxes
+  repeated BoundingBox pred_boxes = 12;  // predicted boxes
 }
 
 message SampleStatistics {
@@ -236,6 +256,10 @@ message SampleStatistics {
   map<int32, bool> sample_discarded = 5;
 
   repeated RecordMetadata records = 8;  
+
+  // Detection summaries (optional)
+  map<int32, int32> gt_box_count   = 10;  // class_id -> #GT boxes
+  map<int32, int32> pred_box_count = 11;  // class_id -> #pred boxes
 }
 
 message CommandResponse {
@@ -261,6 +285,10 @@ message SampleRequestResponse {
   optional bytes raw_data = 6; 
   optional bytes mask = 7;       
   optional bytes prediction = 8;
+
+  // Detection-specific fields
+  repeated BoundingBox gt_boxes   = 9;   // GT boxes for this sample
+  repeated BoundingBox pred_boxes = 10;  // latest predicted boxes
 }
 
 message BatchSampleRequest {
