@@ -134,12 +134,12 @@ from your_custom_exp import get_exp
 ### Start the trainer process:
 
 ```bash
-python trainer_worker.py
+python trainer_worker.py --experiment experiments.mnist_experiment:get_exp # path.to.py_exp:function
 ```
 
 ## Launch the UI monitoring process:
 ```bash
-python weights_lab.py --root_directory=task
+python weights_lab.py --root_directory=./out/date_time
 ```
 
 ### Open the provided URL

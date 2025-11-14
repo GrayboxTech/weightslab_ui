@@ -1,51 +1,29 @@
-import grpc
+# Standard library imports
+import sys
+import subprocess
 import time
+import argparse
+import importlib
 import io
-
-import numpy as np
-
-from concurrent import futures
+import traceback
+from pathlib import Path
 from threading import Thread
-from PIL import Image
+from concurrent import futures
+from collections import defaultdict
 from typing import List, Tuple, Iterable
-from weightslab.experiment import ArchitectureOpType
+
+# Third-party imports
+import grpc
 import torch
+import numpy as np
+from PIL import Image
+from torchvision import transforms
+
+# Local imports
 import experiment_service_pb2 as pb2
 import experiment_service_pb2_grpc as pb2_grpc
-from collections import defaultdict
-from torchvision import transforms
-from scope_timer import ScopeTimer
-import traceback
-
-# from fashion_mnist_exp import get_exp
-from vad_unet_multi import get_exp, IM_MEAN, IM_STD
-# from vad_exp import get_exp
-# from segmentation_exp import get_exp
-# from imagenet_exp import get_exp
-
-experiment = get_exp()
-
-
-def training_thread_callback():
-    while True:
-        if experiment.get_is_training():
-            experiment.train_step_or_eval_full()
-
-
-training_thread = Thread(target=training_thread_callback)
-training_thread.start()
-
-samples_packaging_timer = ScopeTimer("samples_packaging")
-
-HYPER_PARAMETERS = {
-    ("Experiment Name", "experiment_name", "text", lambda: experiment.name),
-    ("Left Training Steps", "training_left", "number", lambda: experiment.training_steps_to_do),
-    ("Learning Rate", "learning_rate", "number", lambda: experiment.learning_rate),
-    ("Batch Size", "batch_size", "number", lambda: experiment.batch_size),
-    ("Eval Frequency", "eval_frequency", "number", lambda: experiment.eval_full_to_train_steps_ratio),
-    ("Checkpoint Frequency", "checkpooint_frequency", "number", lambda: experiment.experiment_dump_to_train_steps_ratio),
-}
-
+from utils.scope_timer import ScopeTimer
+from weightslab.modules.neuron_ops import ArchitectureNeuronsOpType
 
 def get_hyper_parameters_pb(
         hype_parameters_desc_tuple: Tuple) -> List[pb2.HyperParameterDesc]:
@@ -71,11 +49,12 @@ def get_hyper_parameters_pb(
 
     return hyper_parameters_pb2
 
-def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
 
+def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
+    tensor_name = 'weight'
     layer_id = layer.get_module_id()
     neuron_representations = []
-    for neuron_idx in range(layer.neuron_count):
+    for neuron_idx in range(layer.out_neurons):
         age = int(layer.train_dataset_tracker.get_neuron_age(neuron_idx))
         trate = layer.train_dataset_tracker.get_neuron_triggers(neuron_idx)
         erate = layer.eval_dataset_tracker.get_neuron_triggers(neuron_idx)
@@ -84,7 +63,11 @@ def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
         trate = trate/age if age > 0 else 0
         erate = erate/evage if evage > 0 else 0
 
-        neuron_lr = layer.get_per_neuron_learning_rate(neuron_idx)
+        neuron_lr = layer.get_per_neuron_learning_rate(
+            neuron_idx,
+            is_incoming=False,
+            tensor_name=tensor_name
+        )
 
         neuron_representation = pb2.NeuronStatistics(
             neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=neuron_idx),
@@ -93,33 +76,26 @@ def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
             eval_trigger_rate=erate,
             learning_rate=neuron_lr,
         )
-        for incoming_id, incoming_lr in  layer.incoming_neuron_2_lr.items():
-            neuron_representation.incoming_neurons_lr[incoming_id] = incoming_lr
+        for incoming_id, incoming_lr in layer.incoming_neuron_2_lr[tensor_name].items():
+            neuron_representation.incoming_lr[incoming_id] = incoming_lr
 
         neuron_representations.append(neuron_representation)
 
     return neuron_representations
 
+
 def get_layer_representation(layer) -> pb2.LayerRepresentation:
     layer_representation = None
-    if "Conv2d" in layer.__class__.__name__:
-        layer_representation = pb2.LayerRepresentation(
-            layer_id=layer.get_module_id(),
-            layer_name=layer.__class__.__name__,
-            layer_type="Conv2d",
-            incoming_neurons_count=layer.incoming_neuron_count,
-            neurons_count=layer.neuron_count,
-            kernel_size=layer.kernel_size[0],
-            stride=layer.stride[0],
-        )
-    elif "Linear" in layer.__class__.__name__:
-        layer_representation = pb2.LayerRepresentation(
-            layer_id=layer.get_module_id(),
-            layer_name=layer.__class__.__name__,
-            layer_type="Linear",
-            incoming_neurons_count=layer.incoming_neuron_count,
-            neurons_count=layer.neuron_count,
-        )
+    parameters = {
+        'layer_id': layer.get_module_id(),
+        'layer_name': layer.__class__.__name__,
+        'layer_type': layer.module_name,
+        'incoming_neurons_count': layer.in_neurons,
+        'neurons_count': layer.out_neurons,
+        'kernel_size': layer.kernel_size[0] if hasattr(layer, 'kernel_size') else None,
+        'stride': layer.stride[0] if hasattr(layer, 'stride') else None
+    }
+    layer_representation = pb2.LayerRepresentation(**parameters)
     if layer_representation is None:
         return None
 
@@ -127,9 +103,19 @@ def get_layer_representation(layer) -> pb2.LayerRepresentation:
         get_neuron_representations(layer))
     return layer_representation
 
+
 def get_layer_representations(model):
     layer_representations = []
+    # helper to check if layer is BatchNorm layer
+    def _is_batchnorm(layer) -> bool:
+        name = getattr(layer, "__class__", type(layer)).__name__
+        mname = getattr(layer, "module_name", "") 
+        return ("BatchNorm" in name) or ("batchnorm" in mname.lower())
+
     for layer in model.layers:
+        # Skip BatchNorm layers
+        if _is_batchnorm(layer):
+            continue
         layer_representation = get_layer_representation(layer)
         if layer_representation is None:
             continue
@@ -689,8 +675,8 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         return response
 
     def _apply_zerofy(self, layer, from_ids, to_ids):
-        in_max = int(layer.incoming_neuron_count)
-        out_max = int(layer.neuron_count)
+        in_max = int(layer.in_neurons)
+        out_max = int(layer.out_neurons)
 
         from_set = {i for i in set(from_ids) if 0 <= i < in_max}
         to_set   = {i for i in set(to_ids)   if 0 <= i < out_max}
@@ -714,7 +700,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
                 experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.PRUNE,
+                    op_type=ArchitectureNeuronsOpType.PRUNE,
                     layer_id=layer_id,
                     neuron_indices=set(neuron_ids))
 
@@ -723,9 +709,9 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 message=f"Pruned {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.ADD_NEURONS:
             experiment.apply_architecture_op(
-                op_type = ArchitectureOpType.ADD_NEURONS,
+                op_type=ArchitectureNeuronsOpType.ADD,
                 layer_id=weight_operations.layer_id,
-                neuron_count=weight_operations.neurons_to_add)
+                neuron_indices=weight_operations.neurons_to_add)
             answer = pb2.WeightsOperationResponse(
                 success=True,
                 message=\
@@ -739,16 +725,16 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                     neuron_id.neuron_id)
             for layer_id, neuron_ids in layer_id_to_neuron_ids_list.items():
                 experiment.apply_architecture_op(
-                    op_type=ArchitectureOpType.FREEZE,
+                    op_type=ArchitectureNeuronsOpType.FREEZE,
                     layer_id=layer_id,
-                    neuron_ids=neuron_ids)
+                    neuron_indices=neuron_ids)
             answer = pb2.WeightsOperationResponse(
                 success=True,
                 message=f"Frozen {str(dict(layer_id_to_neuron_ids_list))}")
         elif weight_operations.op_type == pb2.WeightOperationType.REINITIALIZE:
             for neuron_id in weight_operations.neuron_ids:
                 experiment.apply_architecture_op(
-                    op_type = ArchitectureOpType.REINITIALIZE,
+                    op_type=ArchitectureNeuronsOpType.RESET,
                     layer_id=neuron_id.layer_id,
                     neuron_indices={neuron_id.neuron_id})
 
@@ -766,8 +752,12 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             if len(weight_operations.zerofy_predicates) > 0:
                 frozen = set()
                 try:
-                    for nid in range(getattr(layer, "neuron_count", 0)):
-                        if layer.get_per_neuron_learning_rate(nid) == 0.0:
+                    for nid in range(getattr(layer, "out_neurons", 0)):
+                        if layer.get_per_neuron_learning_rate(
+                            nid,
+                            is_incoming=False,
+                            tensor_name='weight'
+                        ) == 0.0:
                             frozen.add(nid)
                 except Exception:
                     pass
@@ -776,7 +766,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 try:
                     td_tracker = getattr(layer, "train_dataset_tracker", None)
                     if td_tracker is not None:
-                        for nid in range(getattr(layer, "neuron_count", 0)):
+                        for nid in range(getattr(layer, "out_neurons", 0)):
                             age = int(td_tracker.get_neuron_age(nid))
                             if age > 0:
                                 older.add(nid)
@@ -801,7 +791,7 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
         return answer
 
     def GetWeights(self, request, context):
-        # print(f"ExperimentServiceServicer.GetWeights({request})")
+        print(f"ExperimentServiceServicer.GetWeights({request})")
         answer = pb2.WeightsResponse(success=True, error_message="")
 
         neuron_id = request.neuron_id
@@ -813,18 +803,17 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
             answer.error_messages = str(e)
             return answer
 
-        #answer.neuron_id = request.neuron_id
         answer.neuron_id.CopyFrom(request.neuron_id)
         answer.layer_name = layer.__class__.__name__
-        answer.incoming = layer.incoming_neuron_count
-        answer.outgoing = layer.neuron_count
+        answer.incoming = layer.in_neurons
+        answer.outgoing = layer.out_neurons
         if "Conv2d" in layer.__class__.__name__:
             answer.layer_type = "Conv2d"
             answer.kernel_size = layer.kernel_size[0]
         elif "Linear" in layer.__class__.__name__:
             answer.layer_type = "Linear"
 
-        if neuron_id.neuron_id >= layer.neuron_count:
+        if neuron_id.neuron_id >= layer.out_neurons:
             answer.success = False
             answer.error_messages = \
                 f"Neuron {neuron_id.neuron_id} outside bounds."
@@ -863,7 +852,10 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
             with torch.no_grad():
                 intermediaries = {request.layer_id: None}
-                _= experiment.model.forward(x, intermediary_outputs=intermediaries)
+                experiment.model.forward(
+                    x, 
+                    intermediary_outputs=intermediaries
+                )
 
             if intermediaries[request.layer_id] is None:
                 raise ValueError(f"No intermediary layer {request.layer_id}")
@@ -896,15 +888,99 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
 
         return empty_resp
 
+def force_kill_all_python_processes():
+    """
+    Attempt to kill ALL running Python processes on the machine.
+    *** WARNING: USE WITH EXTREME CAUTION! ***
+    """
+    print("WARNING: Attempting to kill all Python processes. This could affect other applications.")
+    
+    if sys.platform.startswith('win'):
+        # Windows: use taskkill to terminate all 'python.exe' processes
+        try:
+            # /F : Force termination
+            # /IM : Specifies the image name (python.exe)
+            subprocess.run(['taskkill', '/F', '/IM', 'python.exe'], check=True)
+            print("All Python processes (Windows) have been terminated.")
+        except subprocess.CalledProcessError as e:
+            # This happens if no Python process is found
+            print(f"No Python process found or an error occurred during termination: {e}")
+            
+    elif sys.platform.startswith('linux') or sys.platform.startswith('darwin'):
+        # Linux/macOS: use pkill with SIGKILL (-9) to kill 'python' or 'python3' processes
+        try:
+            # pgrep finds the PIDs of processes named 'python', and pkill sends signal 9 (SIGKILL)
+            # -f : searches the full command line (including arguments)
+            subprocess.run(['pkill', '-9', '-f', 'python'], check=True)
+            print("All Python processes (Unix/Linux/macOS) have been terminated.")
+        except subprocess.CalledProcessError as e:
+            # This happens if no Python process is found
+            print(f"No Python process found or an error occurred during termination: {e}")
+            
+    else:
+        print(f"Operating system '{sys.platform}' not supported for forced termination.")
+
+
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=6))
     servicer = ExperimentServiceServicer()
     pb2_grpc.add_ExperimentServiceServicer_to_server(servicer, server)
     server.add_insecure_port('[::]:50051')
-    server.start()
-    # experiment.toggle_training_status()
-    server.wait_for_termination()
+    try:
+        server.start()
+        print("Server started. Press Ctrl+C to stop.")
+        server.wait_for_termination()
+    except KeyboardInterrupt:
+        # Brut force kill this service
+        force_kill_all_python_processes()
 
 
 if __name__ == '__main__':
+
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+
+    parser = argparse.ArgumentParser(description="Trainer worker")
+    parser.add_argument(
+        "--experiment",
+        required=True,
+        help="Experiment factory in 'package.module:function' form, "
+             "e.g. fashion_mnist_exp_under_2k:get_exp",
+    )
+    args, _ = parser.parse_known_args()
+
+    def import_callable(spec: str):
+        if ":" not in spec:
+            raise SystemExit("Invalid --experiment. Expected 'package.module:function'")
+        module, func = spec.split(":", 1)
+        mod = importlib.import_module(module)
+        fn = getattr(mod, func, None)
+        if not callable(fn):
+            raise SystemExit(f"'{module}:{func}' not found or not callable")
+        return fn
+
+    get_exp = import_callable(args.experiment)
+    experiment = get_exp()
+    experiment.register_train_loop_callback(lambda: experiment.display_stats())
+    print(f"[trainer_worker] Loaded experiment from {args.experiment}: {experiment}")
+
+    def training_thread_callback():
+        while True:
+            if experiment.get_is_training():
+                experiment.train_step_or_eval_full()
+
+    samples_packaging_timer = ScopeTimer("samples_packaging")
+
+    HYPER_PARAMETERS = {
+        ("Experiment Name", "experiment_name", "text", lambda: experiment.name),
+        ("Left Training Steps", "training_left", "number", lambda: experiment.training_steps_to_do),
+        ("Learning Rate", "learning_rate", "number", lambda: experiment.learning_rate),
+        ("Batch Size", "batch_size", "number", lambda: experiment.batch_size),
+        ("Eval Frequency", "eval_frequency", "number", lambda: experiment.eval_full_to_train_steps_ratio),
+        ("Checkpoint Frequency", "checkpoint_frequency", "number", lambda: experiment.experiment_dump_to_train_steps_ratio),
+    }
+
+    training_thread = Thread(target=training_thread_callback, daemon=True)
+    training_thread.start()
+
     serve()

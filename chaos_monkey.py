@@ -9,9 +9,9 @@ import experiment_service_pb2_grpc as pb2_grpc
 # For direct mode
 try:
     # Try to import from a central location, adjust as per your project layout!
-    from weightslab.experiment import ArchitectureOpType
+    from weightslab.experiment import ArchitectureNeuronsOpType
 except ImportError:
-    ArchitectureOpType = None  # fallback for RPC only runs
+    ArchitectureNeuronsOpType = None  # fallback for RPC only runs
 
 # ==== CONFIG ====
 MODE = "rpc"  # "rpc" or "direct"
@@ -64,8 +64,8 @@ def chaos_op_rpc(stub):
         print(f"[RPC][Chaos] Sent {op.op_type} on layer {layer_id}: {response.message}")
 
 def chaos_op_direct(experiment):
-    if ArchitectureOpType is None:
-        raise ImportError("ArchitectureOpType enum could not be imported.")
+    if ArchitectureNeuronsOpType is None:
+        raise ImportError("ArchitectureNeuronsOpType enum could not be imported.")
 
     model = experiment.model
     layers = model.layers
@@ -75,10 +75,10 @@ def chaos_op_direct(experiment):
     non_output_layers = layers[:-1]
     layer = random.choice(non_output_layers)
     op_type = random.choice([
-        ArchitectureOpType.ADD_NEURONS,
-        ArchitectureOpType.PRUNE,
-        ArchitectureOpType.REINIT,
-        ArchitectureOpType.FREEZE,
+        ArchitectureNeuronsOpType.ADD,
+        ArchitectureNeuronsOpType.PRUNE,
+        ArchitectureNeuronsOpType.REINIT,
+        ArchitectureNeuronsOpType.FREEZE,
     ])
     n = random.randint(1, 3)
     if layer.neuron_count == 0:
@@ -87,13 +87,13 @@ def chaos_op_direct(experiment):
     print(f"[Direct][Chaos] {op_type} on layer {layer.get_module_id()}, neurons: {neuron_indices}")
 
     with experiment.architecture_guard:
-        if op_type == ArchitectureOpType.ADD_NEURONS:
+        if op_type == ArchitectureNeuronsOpType.ADD:
             model.add_neurons(layer_id=layer.get_module_id(), neuron_count=n)
-        elif op_type == ArchitectureOpType.PRUNE:
+        elif op_type == ArchitectureNeuronsOpType.PRUNE:
             model.prune(layer_id=layer.get_module_id(), neuron_indices=neuron_indices)
-        elif op_type == ArchitectureOpType.REINITIALIZE:
+        elif op_type == ArchitectureNeuronsOpType.RESET:
             model.reinit_neurons(layer_id=layer.get_module_id(), neuron_indices=neuron_indices)
-        elif op_type == ArchitectureOpType.FREEZE:
+        elif op_type == ArchitectureNeuronsOpType.FREEZE:
             model.freeze(layer_id=layer.get_module_id(), neuron_ids=neuron_indices)
 
 def run_chaos(mode="rpc", duration=60):

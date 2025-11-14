@@ -158,7 +158,7 @@ message NeuronStatistics {
   optional float bias_difference = 6;
 
   optional float learning_rate = 7;
-  map<int32, float> incoming_learning_rate = 8;
+  map<int32, float> incoming_lr = 8;
 
 }
 
