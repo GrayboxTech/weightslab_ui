@@ -1,131 +1,88 @@
 import os
-from typing import List, Set, Dict
+import datetime
 import torch
-import torch as th
 import torch.nn as nn
 import torch.optim as optim
 
-import numpy as np
-
-from torch.nn import functional as F
 from torchvision import transforms as T
 from torchvision import datasets as ds
-import torchvision.transforms as tt
-
-from weightslab.experiment import Experiment
-from weightslab.model_with_ops import NetworkWithOps
-from weightslab.model_with_ops import DepType
-from weightslab.modules_with_ops import Conv2dWithNeuronOps
-from weightslab.modules_with_ops import LinearWithNeuronOps
-from weightslab.modules_with_ops import BatchNorm2dWithNeuronOps
-from weightslab.modules_with_ops import LayerWiseOperations
-
-from weightslab.tracking import TrackingMode
-from weightslab.tracking import add_tracked_attrs_to_input_tensor
-
-from torch.utils.data import DataLoader, random_split
-
+from torch.nn import functional as F
 from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
 
-from board import Dash
+from weightslab.experiment.experiment import Experiment
+from .board import Dash
 
 
-class ConvNet(NetworkWithOps, nn.Module):
-    def __init__(self):
-        super(ConvNet, self).__init__()
-        self.tracking_mode = TrackingMode.DISABLED
+class ConvNet(nn.Module):
+    def __init__(self, num_classes: int = 78):
+        super().__init__()
+
         # Convolution block 1
-        self.conv1 = Conv2dWithNeuronOps(in_channels=3, out_channels=12, kernel_size=3, padding=1)
-        self.bnorm1 = BatchNorm2dWithNeuronOps(12)
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm1 = nn.BatchNorm2d(12)
 
         # Convolution block 2
-        self.conv2 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
-        self.bnorm2 = BatchNorm2dWithNeuronOps(12)
+        self.conv2 = nn.Conv2d(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm2 = nn.BatchNorm2d(12)
 
         # Convolution block 3
-        self.conv3 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
-        self.bnorm3 = BatchNorm2dWithNeuronOps(12)
+        self.conv3 = nn.Conv2d(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm3 = nn.BatchNorm2d(12)
 
         # Convolution block 4
-        self.conv4 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
-        self.bnorm4 = BatchNorm2dWithNeuronOps(12)
+        self.conv4 = nn.Conv2d(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm4 = nn.BatchNorm2d(12)
 
         # Convolution block 5
-        self.conv5 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
-        self.bnorm5 = BatchNorm2dWithNeuronOps(12)
+        self.conv5 = nn.Conv2d(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm5 = nn.BatchNorm2d(12)
 
         # Convolution block 6
-        self.conv6 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
-        self.bnorm6 = BatchNorm2dWithNeuronOps(12)
+        self.conv6 = nn.Conv2d(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm6 = nn.BatchNorm2d(12)
 
         # Convolution block 7
-        self.conv7 = Conv2dWithNeuronOps(in_channels=12, out_channels=12, kernel_size=3, padding=1)
-        self.bnorm7 = BatchNorm2dWithNeuronOps(12)
+        self.conv7 = nn.Conv2d(in_channels=12, out_channels=12, kernel_size=3, padding=1)
+        self.bnorm7 = nn.BatchNorm2d(12)
 
-        # Fully connected output
-        self.fc = LinearWithNeuronOps(48, 78)
+        # Fully connected output (12 channels * 2 * 2 = 48)
+        self.fc = nn.Linear(48, num_classes)
 
-    def children(self):
-        return [
-            self.conv1, self.bnorm1, self.conv2, self.bnorm2,
-            self.conv3, self.bnorm3, self.conv4, self.bnorm4,
-            self.conv5, self.bnorm5, self.conv6, self.bnorm6,
-            self.conv7, self.bnorm7,
-            self.fc
-        ]
+        # IMPORTANT: needed so backend / WatcherEditor can create dummy input
+        # Adjust spatial size if your images are not 256x256
+        self.input_shape = (1, 3, 256, 256)
 
-    def define_deps(self):
-        self.register_dependencies([
-            (self.conv1, self.bnorm1, DepType.SAME),
-            (self.bnorm1, self.conv2, DepType.INCOMING),
-            (self.conv2, self.bnorm2, DepType.SAME),
-            (self.bnorm2, self.conv3, DepType.INCOMING),
-            (self.conv3, self.bnorm3, DepType.SAME),
-            (self.bnorm3, self.conv4, DepType.INCOMING),
-            (self.conv4, self.bnorm4, DepType.SAME),
-            (self.bnorm4, self.conv5, DepType.INCOMING),
-            (self.conv5, self.bnorm5, DepType.SAME),
-            (self.bnorm5, self.conv6, DepType.INCOMING),
-            (self.conv6, self.bnorm6, DepType.SAME),
-            (self.bnorm6, self.conv7, DepType.INCOMING),
-            (self.conv7, self.bnorm7, DepType.SAME),
-            (self.bnorm7, self.fc, DepType.INCOMING),
-        ])
-
-        self.flatten_conv_id = self.bnorm7.get_module_id()
-
-    def forward(self, x, intermediary_outputs=None):
-        self.maybe_update_age(x)
+    def forward(self, x):
         # Block 1: conv -> BN -> ReLU -> max pool
-        x = F.relu(self.bnorm1(self.conv1(x, intermediary=intermediary_outputs)))
-        x = F.max_pool2d(x, 2)  # reduces spatial size from 256 -> 128
+        x = F.relu(self.bnorm1(self.conv1(x)))
+        x = F.max_pool2d(x, 2)  # 256 -> 128
 
         # Block 2
-        x = F.relu(self.bnorm2(self.conv2(x, intermediary=intermediary_outputs)))
+        x = F.relu(self.bnorm2(self.conv2(x)))
         x = F.max_pool2d(x, 2)  # 128 -> 64
 
         # Block 3
-        x = F.relu(self.bnorm3(self.conv3(x, intermediary=intermediary_outputs)))
+        x = F.relu(self.bnorm3(self.conv3(x)))
         x = F.max_pool2d(x, 2)  # 64 -> 32
 
         # Block 4
-        x = F.relu(self.bnorm4(self.conv4(x, intermediary=intermediary_outputs)))
+        x = F.relu(self.bnorm4(self.conv4(x)))
         x = F.max_pool2d(x, 2)  # 32 -> 16
 
         # Block 5
-        x = F.relu(self.bnorm5(self.conv5(x, intermediary=intermediary_outputs)))
+        x = F.relu(self.bnorm5(self.conv5(x)))
         x = F.max_pool2d(x, 2)  # 16 -> 8
 
         # Block 6
-        x = F.relu(self.bnorm6(self.conv6(x, intermediary=intermediary_outputs)))
+        x = F.relu(self.bnorm6(self.conv6(x)))
         x = F.max_pool2d(x, 2)  # 8 -> 4
 
         # Block 7
-        x = F.relu(self.bnorm7(self.conv7(x, intermediary=intermediary_outputs)))
+        x = F.relu(self.bnorm7(self.conv7(x)))
         x = F.max_pool2d(x, 2)  # 4 -> 2
 
-        # Flatten
-        x = x.view(x.size(0), -1)  # shape = [batch_size, 4*4*4]
+        # Flatten: [B, 12, 2, 2] -> [B, 48]
+        x = x.view(x.size(0), -1)
         out = self.fc(x)
         return out
 
@@ -143,49 +100,82 @@ val_transform = T.Compose([
     T.Normalize(IM_MEAN, IM_STD),
 ])
 
-root_dir = '/home/rotaru/Desktop/GRAYBOX/repos/datasets/robotics/ycb_datasets/'
 
-train_dataset = ds.ImageFolder(os.path.join(root_dir, "train"), transform=train_transform)
-val_dataset   = ds.ImageFolder(os.path.join(root_dir, "val"),   transform=val_transform)
+def get_datasets(data_dir: str):
+    """
+    Expecting the structure:
+        data_dir/
+          ycb_datasets/
+            train/
+            val/
+    """
+    root_dir = os.path.join(data_dir, "ycb_datasets")
 
+    train_dataset = ds.ImageFolder(
+        os.path.join(root_dir, "train"),
+        transform=train_transform
+    )
+    val_dataset = ds.ImageFolder(
+        os.path.join(root_dir, "val"),
+        transform=val_transform
+    )
+    return train_dataset, val_dataset
 
-train_dataset = ds.ImageFolder(
-    os.path.join(root_dir, "train"), transform=train_transform)
-val_dataset = ds.ImageFolder(
-    os.path.join(root_dir, "val"), transform=val_transform)
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-metrics = {
-    "acc": MulticlassAccuracy(num_classes=78, average="micro").to(device),
-    # "f1": MulticlassF1Score(num_classes=78, average="macro").to(device),
-}
 
 def get_exp():
-    model = ConvNet()
-    model.define_deps()
+    # 1) Output + run directory
+    output_dir = "out"
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = os.path.join(output_dir, timestamp)
+    data_dir = os.path.join(output_dir, "data")
+
+    os.makedirs(run_dir, exist_ok=True)
+    os.makedirs(data_dir, exist_ok=True)
+    print(f"Output directory is {run_dir}")
+    print(f"Data directory is {data_dir}")
+
+    # 2) Datasets
+    train_dataset, val_dataset = get_datasets(data_dir)
+
+    # 3) Device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 4) Model
+    model = ConvNet(num_classes=78)
     model.to(device)
-    exp = Experiment(
-        model=model, optimizer_class=optim.Adam,
-        train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        device=device, learning_rate=1e-3, batch_size=256,
-        training_steps_to_do=200000,
-        name="v0",
-        metrics=metrics,
-        root_log_dir='cad_models',
-        logger=Dash("cad_models"),
-        criterion=nn.CrossEntropyLoss(reduction='none'),
-        skip_loading=False)
 
-    def stateful_difference_monitor_callback():
-        exp.display_stats()
+    # 5) Metrics & Loss
+    metrics: Dict[str, nn.Module] = {
+        "acc": MulticlassAccuracy(num_classes=78, average="micro").to(device),
+        # "f1": MulticlassF1Score(num_classes=78, average="macro").to(device),
+    }
+    criterion = nn.CrossEntropyLoss(reduction="none")
 
-    return exp
+    # 6) Experiment params (mirrors your MNIST experiment)
+    params = {
+        "model": model,
+        "input_shape": model.input_shape,
+        "train_dataset": train_dataset,
+        "eval_dataset": val_dataset,
+        "device": device,
+
+        "optimizer_class": optim.Adam,
+        "learning_rate": 1e-3,
+        "batch_size": 256,
+        "criterion": criterion,
+        "metrics": metrics,
+        "training_steps_to_do": 200_000,
+        "tqdm_display": True,
+        "name": "v0",
+        "skip_loading": False,
+        "root_log_dir": run_dir,
+        "logger": Dash(run_dir),
+    }
+
+    return Experiment(**params)
+
 
 
 if __name__ == "__main__":
-    import pdb; pdb.set_trace()
     exp = get_exp()
     exp.train_step_or_eval_full()
