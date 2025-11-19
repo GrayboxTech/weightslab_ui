@@ -35,7 +35,7 @@ def get_exp():
     device = 'cpu'  # change to: 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # 4) Model
-    model = ResNet18() # or FashionCNNSequential()
+    model = FashionCNNSequential()
     model.to(device)
 
     # 5) Metrics & Loss
