@@ -10,7 +10,7 @@ service ExperimentService {
 
   rpc GetSample(SampleRequest) returns (SampleRequestResponse);
 
-  rpc GetWeights(WeightsRequest) returns (WeightsResponse);
+  rpc GetWeights(WeigthsRequest) returns (WeightsResponse);
 
   rpc GetSamples (BatchSampleRequest) returns (BatchSampleResponse);
 
@@ -234,7 +234,7 @@ message BatchSampleResponse {
   repeated SampleRequestResponse samples = 1;
 }
 
-message WeightsRequest {
+message WeigthsRequest {
   NeuronId neuron_id = 1;
 }
 
