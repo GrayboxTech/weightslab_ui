@@ -24,8 +24,8 @@ import time
 import threading
 import sys
 import dash_bootstrap_components as dbc
-import experiment_service_pb2 as pb2
-import experiment_service_pb2_grpc as pb2_grpc
+import weightslab.proto.experiment_service_pb2 as pb2
+import weightslab.proto.experiment_service_pb2_grpc as pb2_grpc
 import pandas as pd
 import plotly.graph_objs as go
 from dash import dcc, html, MATCH, ALL, no_update, ctx
@@ -46,11 +46,6 @@ from flask import Response, request, abort
 import hashlib
 import io
 
-# sys.argv.extend(
-#     [
-#         "--root_directory", r"C:\Users\GuillaumePelluet\Documents\Codes\grayBox\outputs\test_mnist\202510221800"
-#     ]
-# )
 
 logger = logging.getLogger("ui")
 
@@ -896,7 +891,7 @@ def get_neuron_status(neuron_stats):
     if neuron_stats.learning_rate == 0.0:
         return NeuronStatus.FROZEND
 
-    if neuron_stats.neuron_age <= 10000:
+    if neuron_stats.neuron_age <= 10:
         return NeuronStatus.NEUTRAL
 
     if neuron_stats.train_trigger_rate <= 0.01 or \
