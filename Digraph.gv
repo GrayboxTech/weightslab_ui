@@ -1,0 +1,412 @@
+// N.A.
+digraph {
+	graph [nodesep=0.5 rankdir=TB ranksep=0.75 splines=ortho]
+	node [color=lightblue shape=box style=filled]
+	x [label="Input: x" fillcolor="#F5D1A2"]
+	inc_0 [label="ID=0
+(inc.0)
+Conv2d" fillcolor="#8EBAD9"]
+	x -> inc_0 [label="Src Output: (1, 3, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	inc_1 [label="ID=1
+(inc.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	inc_0 -> inc_1 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	inc_2 [label="ID=None
+(inc.2)
+ReLU" fillcolor="#8EBAD9"]
+	inc_1 -> inc_2 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	inc_3 [label="ID=2
+(inc.3)
+Conv2d" fillcolor="#8EBAD9"]
+	inc_2 -> inc_3 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	inc_4 [label="ID=3
+(inc.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	inc_3 -> inc_4 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	inc_5 [label="ID=None
+(inc.5)
+ReLU" fillcolor="#8EBAD9"]
+	inc_4 -> inc_5 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	down1_pool [label="ID=None
+(down1_pool)
+MaxPool2d" fillcolor="#8EBAD9"]
+	inc_5 -> down1_pool [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 128, 128)" color="#2F4F4F" style=solid]
+	down1_conv_0 [label="ID=4
+(down1_conv.0)
+Conv2d" fillcolor="#8EBAD9"]
+	down1_pool -> down1_conv_0 [label="Src Output: (1, 64, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	down1_conv_1 [label="ID=5
+(down1_conv.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	down1_conv_0 -> down1_conv_1 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	down1_conv_2 [label="ID=None
+(down1_conv.2)
+ReLU" fillcolor="#8EBAD9"]
+	down1_conv_1 -> down1_conv_2 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	down1_conv_3 [label="ID=6
+(down1_conv.3)
+Conv2d" fillcolor="#8EBAD9"]
+	down1_conv_2 -> down1_conv_3 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	down1_conv_4 [label="ID=7
+(down1_conv.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	down1_conv_3 -> down1_conv_4 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	down1_conv_5 [label="ID=None
+(down1_conv.5)
+ReLU" fillcolor="#8EBAD9"]
+	down1_conv_4 -> down1_conv_5 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	down2_pool [label="ID=None
+(down2_pool)
+MaxPool2d" fillcolor="#8EBAD9"]
+	down1_conv_5 -> down2_pool [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 64, 64)" color="#2F4F4F" style=solid]
+	down2_conv_0 [label="ID=8
+(down2_conv.0)
+Conv2d" fillcolor="#8EBAD9"]
+	down2_pool -> down2_conv_0 [label="Src Output: (1, 128, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	down2_conv_1 [label="ID=9
+(down2_conv.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	down2_conv_0 -> down2_conv_1 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	down2_conv_2 [label="ID=None
+(down2_conv.2)
+ReLU" fillcolor="#8EBAD9"]
+	down2_conv_1 -> down2_conv_2 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	down2_conv_3 [label="ID=10
+(down2_conv.3)
+Conv2d" fillcolor="#8EBAD9"]
+	down2_conv_2 -> down2_conv_3 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	down2_conv_4 [label="ID=11
+(down2_conv.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	down2_conv_3 -> down2_conv_4 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	down2_conv_5 [label="ID=None
+(down2_conv.5)
+ReLU" fillcolor="#8EBAD9"]
+	down2_conv_4 -> down2_conv_5 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	down3_pool [label="ID=None
+(down3_pool)
+MaxPool2d" fillcolor="#8EBAD9"]
+	down2_conv_5 -> down3_pool [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 32, 32)" color="#2F4F4F" style=solid]
+	down3_conv_0 [label="ID=12
+(down3_conv.0)
+Conv2d" fillcolor="#8EBAD9"]
+	down3_pool -> down3_conv_0 [label="Src Output: (1, 256, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	down3_conv_1 [label="ID=13
+(down3_conv.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	down3_conv_0 -> down3_conv_1 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	down3_conv_2 [label="ID=None
+(down3_conv.2)
+ReLU" fillcolor="#8EBAD9"]
+	down3_conv_1 -> down3_conv_2 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	down3_conv_3 [label="ID=14
+(down3_conv.3)
+Conv2d" fillcolor="#8EBAD9"]
+	down3_conv_2 -> down3_conv_3 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	down3_conv_4 [label="ID=15
+(down3_conv.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	down3_conv_3 -> down3_conv_4 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	down3_conv_5 [label="ID=None
+(down3_conv.5)
+ReLU" fillcolor="#8EBAD9"]
+	down3_conv_4 -> down3_conv_5 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	down4_pool [label="ID=None
+(down4_pool)
+MaxPool2d" fillcolor="#8EBAD9"]
+	down3_conv_5 -> down4_pool [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 16, 16)" color="#2F4F4F" style=solid]
+	down4_conv_0 [label="ID=16
+(down4_conv.0)
+Conv2d" fillcolor="#8EBAD9"]
+	down4_pool -> down4_conv_0 [label="Src Output: (1, 512, 16, 16)
+Dst Output: (1, 1024, 16, 16)" color="#2F4F4F" style=solid]
+	down4_conv_1 [label="ID=17
+(down4_conv.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	down4_conv_0 -> down4_conv_1 [label="Src Output: (1, 1024, 16, 16)
+Dst Output: (1, 1024, 16, 16)" color="#2F4F4F" style=solid]
+	down4_conv_2 [label="ID=None
+(down4_conv.2)
+ReLU" fillcolor="#8EBAD9"]
+	down4_conv_1 -> down4_conv_2 [label="Src Output: (1, 1024, 16, 16)
+Dst Output: (1, 1024, 16, 16)" color="#2F4F4F" style=solid]
+	down4_conv_3 [label="ID=18
+(down4_conv.3)
+Conv2d" fillcolor="#8EBAD9"]
+	down4_conv_2 -> down4_conv_3 [label="Src Output: (1, 1024, 16, 16)
+Dst Output: (1, 1024, 16, 16)" color="#2F4F4F" style=solid]
+	down4_conv_4 [label="ID=19
+(down4_conv.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	down4_conv_3 -> down4_conv_4 [label="Src Output: (1, 1024, 16, 16)
+Dst Output: (1, 1024, 16, 16)" color="#2F4F4F" style=solid]
+	down4_conv_5 [label="ID=None
+(down4_conv.5)
+ReLU" fillcolor="#8EBAD9"]
+	down4_conv_4 -> down4_conv_5 [label="Src Output: (1, 1024, 16, 16)
+Dst Output: (1, 1024, 16, 16)" color="#2F4F4F" style=solid]
+	up1_up [label="ID=20
+(up1_up)
+ConvTranspose2d" fillcolor="#8EBAD9"]
+	down4_conv_5 -> up1_up [label="Src Output: (1, 1024, 16, 16)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	getattr_1 [label="Function: getattr" fillcolor="#A6D9A6"]
+	down3_conv_5 -> getattr_1 [label="Src Output: (1, 512, 32, 32)
+Dst Output: N/A" color="#2F4F4F" style=solid]
+	getitem [label="Function: getitem" fillcolor="#A6D9A6"]
+	getattr_1 -> getitem [label="Src Output: N/A
+Dst Output: N/A" color="#2F4F4F" style=solid]
+	interpolate [label="Function: interpolate" fillcolor="#A6D9A6"]
+	up1_up -> interpolate [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	cat [label="Function: cat" fillcolor="#A6D9A6"]
+	up1_conv_0 [label="ID=21
+(up1_conv.0)
+Conv2d" fillcolor="#8EBAD9"]
+	cat -> up1_conv_0 [label="Src Output: (1, 1024, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	up1_conv_1 [label="ID=22
+(up1_conv.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	up1_conv_0 -> up1_conv_1 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	up1_conv_2 [label="ID=None
+(up1_conv.2)
+ReLU" fillcolor="#8EBAD9"]
+	up1_conv_1 -> up1_conv_2 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	up1_conv_3 [label="ID=23
+(up1_conv.3)
+Conv2d" fillcolor="#8EBAD9"]
+	up1_conv_2 -> up1_conv_3 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	up1_conv_4 [label="ID=24
+(up1_conv.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	up1_conv_3 -> up1_conv_4 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	up1_conv_5 [label="ID=None
+(up1_conv.5)
+ReLU" fillcolor="#8EBAD9"]
+	up1_conv_4 -> up1_conv_5 [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 512, 32, 32)" color="#2F4F4F" style=solid]
+	up2_up [label="ID=25
+(up2_up)
+ConvTranspose2d" fillcolor="#8EBAD9"]
+	up1_conv_5 -> up2_up [label="Src Output: (1, 512, 32, 32)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	getattr_2 [label="Function: getattr" fillcolor="#A6D9A6"]
+	down2_conv_5 -> getattr_2 [label="Src Output: (1, 256, 64, 64)
+Dst Output: N/A" color="#2F4F4F" style=solid]
+	getitem_1 [label="Function: getitem" fillcolor="#A6D9A6"]
+	getattr_2 -> getitem_1 [label="Src Output: N/A
+Dst Output: N/A" color="#2F4F4F" style=solid]
+	interpolate_1 [label="Function: interpolate" fillcolor="#A6D9A6"]
+	up2_up -> interpolate_1 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	cat_1 [label="Function: cat" fillcolor="#A6D9A6"]
+	up2_conv_0 [label="ID=26
+(up2_conv.0)
+Conv2d" fillcolor="#8EBAD9"]
+	cat_1 -> up2_conv_0 [label="Src Output: (1, 512, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	up2_conv_1 [label="ID=27
+(up2_conv.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	up2_conv_0 -> up2_conv_1 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	up2_conv_2 [label="ID=None
+(up2_conv.2)
+ReLU" fillcolor="#8EBAD9"]
+	up2_conv_1 -> up2_conv_2 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	up2_conv_3 [label="ID=28
+(up2_conv.3)
+Conv2d" fillcolor="#8EBAD9"]
+	up2_conv_2 -> up2_conv_3 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	up2_conv_4 [label="ID=29
+(up2_conv.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	up2_conv_3 -> up2_conv_4 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	up2_conv_5 [label="ID=None
+(up2_conv.5)
+ReLU" fillcolor="#8EBAD9"]
+	up2_conv_4 -> up2_conv_5 [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 256, 64, 64)" color="#2F4F4F" style=solid]
+	up3_up [label="ID=30
+(up3_up)
+ConvTranspose2d" fillcolor="#8EBAD9"]
+	up2_conv_5 -> up3_up [label="Src Output: (1, 256, 64, 64)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	getattr_3 [label="Function: getattr" fillcolor="#A6D9A6"]
+	down1_conv_5 -> getattr_3 [label="Src Output: (1, 128, 128, 128)
+Dst Output: N/A" color="#2F4F4F" style=solid]
+	getitem_2 [label="Function: getitem" fillcolor="#A6D9A6"]
+	getattr_3 -> getitem_2 [label="Src Output: N/A
+Dst Output: N/A" color="#2F4F4F" style=solid]
+	interpolate_2 [label="Function: interpolate" fillcolor="#A6D9A6"]
+	up3_up -> interpolate_2 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	cat_2 [label="Function: cat" fillcolor="#A6D9A6"]
+	up3_conv_0 [label="ID=31
+(up3_conv.0)
+Conv2d" fillcolor="#8EBAD9"]
+	cat_2 -> up3_conv_0 [label="Src Output: (1, 256, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	up3_conv_1 [label="ID=32
+(up3_conv.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	up3_conv_0 -> up3_conv_1 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	up3_conv_2 [label="ID=None
+(up3_conv.2)
+ReLU" fillcolor="#8EBAD9"]
+	up3_conv_1 -> up3_conv_2 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	up3_conv_3 [label="ID=33
+(up3_conv.3)
+Conv2d" fillcolor="#8EBAD9"]
+	up3_conv_2 -> up3_conv_3 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	up3_conv_4 [label="ID=34
+(up3_conv.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	up3_conv_3 -> up3_conv_4 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	up3_conv_5 [label="ID=None
+(up3_conv.5)
+ReLU" fillcolor="#8EBAD9"]
+	up3_conv_4 -> up3_conv_5 [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 128, 128, 128)" color="#2F4F4F" style=solid]
+	up4_up [label="ID=35
+(up4_up)
+ConvTranspose2d" fillcolor="#8EBAD9"]
+	up3_conv_5 -> up4_up [label="Src Output: (1, 128, 128, 128)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	getattr_4 [label="Function: getattr" fillcolor="#A6D9A6"]
+	inc_5 -> getattr_4 [label="Src Output: (1, 64, 256, 256)
+Dst Output: N/A" color="#2F4F4F" style=solid]
+	getitem_3 [label="Function: getitem" fillcolor="#A6D9A6"]
+	getattr_4 -> getitem_3 [label="Src Output: N/A
+Dst Output: N/A" color="#2F4F4F" style=solid]
+	interpolate_3 [label="Function: interpolate" fillcolor="#A6D9A6"]
+	up4_up -> interpolate_3 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	cat_3 [label="Function: cat" fillcolor="#A6D9A6"]
+	up4_conv_0 [label="ID=36
+(up4_conv.0)
+Conv2d" fillcolor="#8EBAD9"]
+	cat_3 -> up4_conv_0 [label="Src Output: (1, 128, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	up4_conv_1 [label="ID=37
+(up4_conv.1)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	up4_conv_0 -> up4_conv_1 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	up4_conv_2 [label="ID=None
+(up4_conv.2)
+ReLU" fillcolor="#8EBAD9"]
+	up4_conv_1 -> up4_conv_2 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	up4_conv_3 [label="ID=38
+(up4_conv.3)
+Conv2d" fillcolor="#8EBAD9"]
+	up4_conv_2 -> up4_conv_3 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	up4_conv_4 [label="ID=39
+(up4_conv.4)
+BatchNorm2d" fillcolor="#8EBAD9"]
+	up4_conv_3 -> up4_conv_4 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	up4_conv_5 [label="ID=None
+(up4_conv.5)
+ReLU" fillcolor="#8EBAD9"]
+	up4_conv_4 -> up4_conv_5 [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 64, 256, 256)" color="#2F4F4F" style=solid]
+	outc [label="ID=40
+(outc)
+Conv2d" fillcolor="#8EBAD9"]
+	up4_conv_5 -> outc [label="Src Output: (1, 64, 256, 256)
+Dst Output: (1, 1, 256, 256)" color="#2F4F4F" style=solid]
+	output [label=Output fillcolor="#F5A2A2"]
+	outc -> output [label="Src Output: (1, 1, 256, 256)
+Dst Output: (1, 1, 256, 256)" color="#2F4F4F" style=solid]
+	inc_0 -> inc_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	inc_1 -> inc_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	inc_3 -> inc_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	inc_4 -> down1_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down1_conv_0 -> down1_conv_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down1_conv_1 -> down1_conv_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down1_conv_3 -> down1_conv_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down1_conv_4 -> down2_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down2_conv_0 -> down2_conv_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down2_conv_1 -> down2_conv_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down2_conv_3 -> down2_conv_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down2_conv_4 -> down3_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down3_conv_0 -> down3_conv_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down3_conv_1 -> down3_conv_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down3_conv_3 -> down3_conv_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down3_conv_4 -> down4_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down4_conv_0 -> down4_conv_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down4_conv_1 -> down4_conv_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down4_conv_3 -> down4_conv_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down4_conv_4 -> up1_up [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down3_conv_4 -> up1_up [label=REC color="#2F4F4F" dir=forward style=dashed]
+	down3_conv_4 -> up1_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up1_up -> up1_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up1_conv_0 -> up1_conv_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up1_conv_1 -> up1_conv_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up1_conv_3 -> up1_conv_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up1_conv_4 -> up2_up [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down2_conv_4 -> up2_up [label=REC color="#2F4F4F" dir=forward style=dashed]
+	down2_conv_4 -> up2_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up2_up -> up2_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up2_conv_0 -> up2_conv_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up2_conv_1 -> up2_conv_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up2_conv_3 -> up2_conv_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up2_conv_4 -> up3_up [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	down1_conv_4 -> up3_up [label=REC color="#2F4F4F" dir=forward style=dashed]
+	down1_conv_4 -> up3_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up3_up -> up3_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up3_conv_0 -> up3_conv_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up3_conv_1 -> up3_conv_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up3_conv_3 -> up3_conv_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up3_conv_4 -> up4_up [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	inc_4 -> up4_up [label=REC color="#2F4F4F" dir=forward style=dashed]
+	inc_4 -> up4_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up4_up -> up4_conv_0 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up4_conv_0 -> up4_conv_1 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up4_conv_1 -> up4_conv_3 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up4_conv_3 -> up4_conv_4 [label=SAME color="#2F4F4F" dir=forward style=dashed]
+	up4_conv_4 -> outc [label=SAME color="#2F4F4F" dir=forward style=dashed]
+}

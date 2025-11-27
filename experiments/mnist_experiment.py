@@ -10,7 +10,7 @@ from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
 
 from .board import Dash
 from weightslab.experiment.experiment import Experiment
-from weightslab.tests.torch_models import ResNet18, FashionCNNSequential
+from weightslab.weightslab.baseline_models.pytorch.models import ResNet18, FashionCNNSequential
 
 # MNIST EXPERIMENT
 
@@ -35,7 +35,7 @@ def get_exp():
     device = 'cpu'  # change to: 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # 4) Model
-    model = ResNet18() # or FashionCNNSequential()
+    model = FashionCNNSequential()
     model.to(device)
 
     # 5) Metrics & Loss
