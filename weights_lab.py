@@ -47,7 +47,9 @@ import hashlib
 import io
 
 
+# Set up logging
 logger = logging.getLogger("ui")
+
 
 _HYPERPARAM_COLUMNS = ["label", "type", "name", "value"]
 
@@ -3186,7 +3188,7 @@ def main():
                 neuron_range_text = None
         selected_neuron_ids = _parse_neuron_range(neuron_range_text)
 
-        resp = stub.GetWeights(pb2.WeigthsRequest(
+        resp = stub.GetWeights(pb2.WeightsRequest(
             neuron_id=pb2.NeuronId(layer_id=layer_id, neuron_id=-1)
         ))
         if not resp.success:
