@@ -10,7 +10,7 @@ from torchmetrics.classification import MulticlassAccuracy, MulticlassF1Score
 
 from .board import Dash
 from weightslab.experiment.experiment import Experiment
-from weightslab.tests.torch_models import ResNet18, FashionCNNSequential
+from weightslab.weightslab.baseline_models.pytorch.models import ResNet18, FashionCNNSequential
 
 # MNIST EXPERIMENT
 
