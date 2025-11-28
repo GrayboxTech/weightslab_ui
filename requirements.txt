@@ -12,5 +12,5 @@ grpcio==1.67.0
 grpcio-tools==1.67.0
 pandas==2.2.3
 Pillow==11.0.0
-protobuf==5.28.3
+protobuf==6.33
 tqdm==4.66.4
