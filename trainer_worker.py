@@ -1,64 +1,29 @@
-import io
+# Standard library imports
 import sys
-import grpc
+import subprocess
 import time
-import torch
-import signal
+import argparse
+import importlib
+import io
 import traceback
-import numpy as np
-import experiment_service_pb2 as pb2
-import experiment_service_pb2_grpc as pb2_grpc
-
-from PIL import Image
+from pathlib import Path
 from threading import Thread
 from concurrent import futures
-from torchvision import transforms
-from scope_timer import ScopeTimer
 from collections import defaultdict
 from typing import List, Tuple, Iterable
 
-from weightslab.models.model_with_ops import ArchitectureNeuronsOpType
+# Third-party imports
+import grpc
+import torch
+import numpy as np
+from PIL import Image
+from torchvision import transforms
 
-
-# if len(sys.argv) <= 1:
-#     sys.argv.append(
-#         "import sys; \
-#             sys.path.append('C:/Users/GuillaumePelluet/Documents/Codes/grayBox/');\
-#             from weightslab_ui.fashion_mnist_exp_under_2k import get_exp as exp;\
-#             get_exp=lambda : exp()"
-#     )
-
-# read function as input arguments, check arg reliability with exec(str_fct)
-"""
-    Call usage to start the trainer worker:
-        python .\trainer_worker.py "import sys;
-        sys.path.append('C:/Users/GuillaumePelluet/Documents/Codes/grayBox/');
-        from weightslab_ui.fashion_mnist_exp_under_2k import get_exp as exp;
-        get_exp=lambda : exp()"
-"""
-experiment = (exec(sys.argv[1], ns := {}), ns['get_exp'])[1]()
-
-
-def training_thread_callback():
-    while True:
-        if experiment.get_is_training():
-            experiment.train_step_or_eval_full()
-
-
-training_thread = Thread(target=training_thread_callback)
-training_thread.start()
-
-samples_packaging_timer = ScopeTimer("samples_packaging")
-
-HYPER_PARAMETERS = {
-    ("Experiment Name", "experiment_name", "text", lambda: experiment.name),
-    ("Left Training Steps", "training_left", "number", lambda: experiment.training_steps_to_do),
-    ("Learning Rate", "learning_rate", "number", lambda: experiment.learning_rate),
-    ("Batch Size", "batch_size", "number", lambda: experiment.batch_size),
-    ("Eval Frequency", "eval_frequency", "number", lambda: experiment.eval_full_to_train_steps_ratio),
-    ("Checkpoint Frequency", "checkpooint_frequency", "number", lambda: experiment.experiment_dump_to_train_steps_ratio),
-}
-
+# Local imports
+import experiment_service_pb2 as pb2
+import experiment_service_pb2_grpc as pb2_grpc
+from utils.scope_timer import ScopeTimer
+from weightslab.modules.neuron_ops import ArchitectureNeuronsOpType
 
 def get_hyper_parameters_pb(
         hype_parameters_desc_tuple: Tuple) -> List[pb2.HyperParameterDesc]:
@@ -112,7 +77,7 @@ def get_neuron_representations(layer) -> Iterable[pb2.NeuronStatistics]:
             learning_rate=neuron_lr,
         )
         for incoming_id, incoming_lr in layer.incoming_neuron_2_lr[tensor_name].items():
-            neuron_representation.incoming_neurons_lr[incoming_id] = incoming_lr
+            neuron_representation.incoming_lr[incoming_id] = incoming_lr
 
         neuron_representations.append(neuron_representation)
 
@@ -141,7 +106,16 @@ def get_layer_representation(layer) -> pb2.LayerRepresentation:
 
 def get_layer_representations(model):
     layer_representations = []
+    # helper to check if layer is BatchNorm layer
+    def _is_batchnorm(layer) -> bool:
+        name = getattr(layer, "__class__", type(layer)).__name__
+        mname = getattr(layer, "module_name", "") 
+        return ("BatchNorm" in name) or ("batchnorm" in mname.lower())
+
     for layer in model.layers:
+        # Skip BatchNorm layers
+        if _is_batchnorm(layer):
+            continue
         layer_representation = get_layer_representation(layer)
         if layer_representation is None:
             continue
@@ -913,45 +887,38 @@ class ExperimentServiceServicer(pb2_grpc.ExperimentServiceServicer):
                 f"Traceback: {traceback.format_exc()}")
 
         return empty_resp
-    
-
-import os
-import sys
-import subprocess
-import signal
-import time
 
 def force_kill_all_python_processes():
     """
-    Tente de tuer TOUS les processus python en cours d'exécution sur la machine.
-    *** ATTENTION : UTILISER AVEC EXTRÊME PRÉCAUTION ! ***
+    Attempt to kill ALL running Python processes on the machine.
+    *** WARNING: USE WITH EXTREME CAUTION! ***
     """
-    print("ATTENTION: Tentative de tuer tous les processus python. Ceci pourrait affecter d'autres applications.")
+    print("WARNING: Attempting to kill all Python processes. This could affect other applications.")
     
     if sys.platform.startswith('win'):
-        # Windows : Utilise taskkill pour tuer tous les processus 'python.exe'
+        # Windows: use taskkill to terminate all 'python.exe' processes
         try:
-            # /F : Force la terminaison
-            # /IM : Spécifie le nom de l'image (python.exe)
+            # /F : Force termination
+            # /IM : Specifies the image name (python.exe)
             subprocess.run(['taskkill', '/F', '/IM', 'python.exe'], check=True)
-            print("Tous les processus python (Windows) ont été terminés.")
+            print("All Python processes (Windows) have been terminated.")
         except subprocess.CalledProcessError as e:
-            # Cela arrive si aucun processus python n'est trouvé
-            print(f"Aucun processus python trouvé ou erreur lors de la terminaison : {e}")
+            # This happens if no Python process is found
+            print(f"No Python process found or an error occurred during termination: {e}")
             
     elif sys.platform.startswith('linux') or sys.platform.startswith('darwin'):
-        # Linux/macOS : Utilise pkill avec SIGKILL (-9) pour les processus 'python' ou 'python3'
+        # Linux/macOS: use pkill with SIGKILL (-9) to kill 'python' or 'python3' processes
         try:
-            # pgrep trouve les PIDs des processus nommés 'python' et pkill envoie le signal 9 (SIGKILL)
-            # -f : recherche le pattern dans la ligne de commande complète (y compris les arguments)
+            # pgrep finds the PIDs of processes named 'python', and pkill sends signal 9 (SIGKILL)
+            # -f : searches the full command line (including arguments)
             subprocess.run(['pkill', '-9', '-f', 'python'], check=True)
-            print("Tous les processus python (Unix/Linux/macOS) ont été terminés.")
+            print("All Python processes (Unix/Linux/macOS) have been terminated.")
         except subprocess.CalledProcessError as e:
-            # Cela arrive si aucun processus python n'est trouvé
-            print(f"Aucun processus python trouvé ou erreur lors de la terminaison : {e}")
+            # This happens if no Python process is found
+            print(f"No Python process found or an error occurred during termination: {e}")
             
     else:
-        print(f"Système d'exploitation '{sys.platform}' non supporté pour l'arrêt forcé.")
+        print(f"Operating system '{sys.platform}' not supported for forced termination.")
 
 
 def serve():
@@ -969,4 +936,51 @@ def serve():
 
 
 if __name__ == '__main__':
+
+    if str(Path.cwd()) not in sys.path:
+        sys.path.insert(0, str(Path.cwd()))
+
+    parser = argparse.ArgumentParser(description="Trainer worker")
+    parser.add_argument(
+        "--experiment",
+        required=True,
+        help="Experiment factory in 'package.module:function' form, "
+             "e.g. fashion_mnist_exp_under_2k:get_exp",
+    )
+    args, _ = parser.parse_known_args()
+
+    def import_callable(spec: str):
+        if ":" not in spec:
+            raise SystemExit("Invalid --experiment. Expected 'package.module:function'")
+        module, func = spec.split(":", 1)
+        mod = importlib.import_module(module)
+        fn = getattr(mod, func, None)
+        if not callable(fn):
+            raise SystemExit(f"'{module}:{func}' not found or not callable")
+        return fn
+
+    get_exp = import_callable(args.experiment)
+    experiment = get_exp()
+    experiment.register_train_loop_callback(lambda: experiment.display_stats())
+    print(f"[trainer_worker] Loaded experiment from {args.experiment}: {experiment}")
+
+    def training_thread_callback():
+        while True:
+            if experiment.get_is_training():
+                experiment.train_step_or_eval_full()
+
+    samples_packaging_timer = ScopeTimer("samples_packaging")
+
+    HYPER_PARAMETERS = {
+        ("Experiment Name", "experiment_name", "text", lambda: experiment.name),
+        ("Left Training Steps", "training_left", "number", lambda: experiment.training_steps_to_do),
+        ("Learning Rate", "learning_rate", "number", lambda: experiment.learning_rate),
+        ("Batch Size", "batch_size", "number", lambda: experiment.batch_size),
+        ("Eval Frequency", "eval_frequency", "number", lambda: experiment.eval_full_to_train_steps_ratio),
+        ("Checkpoint Frequency", "checkpoint_frequency", "number", lambda: experiment.experiment_dump_to_train_steps_ratio),
+    }
+
+    training_thread = Thread(target=training_thread_callback, daemon=True)
+    training_thread.start()
+
     serve()
